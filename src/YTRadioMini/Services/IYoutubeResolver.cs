@@ -10,6 +10,7 @@ public enum ResolveErrorKind
     NotStarted,     // 直播尚未开始
     Timeout,
     ToolMissing,    // 找不到 yt-dlp
+    SignInRequired, // YouTube 要求登录或人机验证
     ParseFailed,    // yt-dlp 无法解析或输出异常
 }
 
