@@ -1,0 +1,20 @@
+{
+  "_comment": "External programs bundled into the release package. Every download is checked against the SHA-256 below before it is used; change the version, url and sha256 together.",
+  "mpv": {
+    "version": "20261027-git-77e8f9cfa1",
+    "url": "https://github.com/zhongfly/mpv-winbuild/releases/download/2026-10-27-77e8f9cfa1/mpv-x86_64-20261027-git-77e8f9cfa1.7z",
+    "sha256": "84580ca0fbbeaac99294b40eb07c62259b5c16e33275ee0bc4200239da1f518c",
+    "sha256Origin": "Computed from the archive when this version was pinned; the publisher does not provide a checksum file for it.",
+    "archiveFile": "mpv-x86_64-20261027-git-77e8f9cfa1.7z",
+    "extract": "mpv.exe",
+    "project": "https://github.com/zhongfly/mpv-winbuild (build of https://github.com/mpv-player/mpv)"
+  },
+  "ytDlp": {
+    "version": "2026.10.26",
+    "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.exe",
+    "sha256": "f5389d3698ecde4ef06f4e6b1ce0294fe9ac1396228c8990b8d3416d6d177a7d",
+    "sha256Origin": "Identical to the value for yt-dlp.exe in the SHA2-256SUMS file published with release 2026.10.26.",
+    "file": "yt-dlp.exe",
+    "project": "https://github.com/yt-dlp/yt-dlp"
+  }
+}

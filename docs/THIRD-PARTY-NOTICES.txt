@@ -1,0 +1,27 @@
+THIRD-PARTY NOTICES
+===================
+
+YT Radio Mini starts the following programs as separate processes. They are not linked into
+YTRadioMini.exe. Exact versions and SHA-256 checksums are listed in DEPENDENCIES.txt.
+
+mpv
+  Project : https://github.com/mpv-player/mpv  (Windows build by https://github.com/zhongfly/mpv-winbuild)
+  Licence : mpv is distributed under the GNU GPL version 2 or later; builds made with the
+            LGPL option are under the GNU LGPL version 2.1 or later. The build bundled here
+            statically includes FFmpeg and other libraries, each under its own licence.
+            See the licence information of the build at the project page above for the exact terms
+            that apply to the bundled mpv.exe.
+  Source  : https://github.com/mpv-player/mpv and https://github.com/zhongfly/mpv-winbuild
+
+yt-dlp
+  Project : https://github.com/yt-dlp/yt-dlp
+  Licence : The Unlicense (public domain dedication). The Windows executable also contains
+            third-party components, listed in the release notes of the project.
+  Source  : https://github.com/yt-dlp/yt-dlp
+
+.NET
+  YTRadioMini.exe is published as a self-contained application: the .NET runtime and the
+  Windows Forms libraries (Microsoft, MIT licence) sit next to it in this folder.
+  https://github.com/dotnet/runtime  https://github.com/dotnet/winforms
+
+This notice is informational and is not legal advice.
