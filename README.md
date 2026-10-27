@@ -38,7 +38,7 @@ Requires the .NET 10 SDK.
 | `youtube.com/watch?v=ID`, `youtu.be/ID`, `youtube.com/live/ID`, `youtube.com/shorts/ID` | One video or live stream |
 | `youtube.com/playlist?list=ID` | The playlist, expanded into the queue |
 | `watch?v=ID&list=ID` (a video inside a playlist) | The playlist |
-| A video with an automatic Mix (`list=RD…`) | The video starts playing right away, then the Mix is expanded and appended after it. If the Mix cannot be expanded, only the video plays. |
+| A video with an automatic Mix (`list=RD…`) | The video starts playing right away, then the Mix's first page (the 25 entries YouTube lists when it opens the Mix) is appended after it; videos already in the queue are skipped. A Mix is endless and different every time, so only that first page is used. If the Mix cannot be expanded, only the video plays and the LCD shows `MIX: <reason>`. |
 
 Lines that are not supported YouTube links are skipped and counted on the LCD. Only `youtube.com`, `www.`, `m.`, `music.` and `youtu.be` are accepted.
 

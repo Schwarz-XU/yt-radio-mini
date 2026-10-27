@@ -138,6 +138,39 @@ public class YoutubeResolverTests
     }
 
     [Fact]
+    public async Task Mix_IsLimitedToAFewItemsAndAShortTimeout()
+    {
+        IReadOnlyList<string>? seen = null;
+        TimeSpan? timeout = null;
+        var resolver = new YoutubeResolver("yt-dlp", runner: (_, args, t, _) =>
+        {
+            seen = args;
+            timeout = t;
+            return Task.FromResult(new ProcessResult(0, """{"entries":[{"id":"AAAAAAAAAAA","title":"a"}]}""", "", false, false));
+        });
+        var mix = new ParsedLink(LinkKind.Playlist, "https://www.youtube.com/watch?v=AAAAAAAAAAA&list=RDAAAAAAAAAAA", "RDAAAAAAAAAAA", "x", "AAAAAAAAAAA");
+
+        var r = await resolver.ResolveAsync(mix, default);
+
+        Assert.Null(r.Failure);
+        var i = seen!.ToList().IndexOf("--playlist-end");
+        Assert.Equal(YoutubeResolver.MaxMixItems.ToString(), seen![i + 1]);
+        Assert.Equal(mix.Url, seen[^1]);
+        Assert.True(timeout < TimeSpan.FromSeconds(60));
+    }
+
+    [Fact]
+    public async Task OrdinaryPlaylist_UsesTheLargeLimit()
+    {
+        IReadOnlyList<string>? seen = null;
+        await With(new ProcessResult(0, """{"entries":[{"id":"AAAAAAAAAAA","title":"a"}]}""", "", false, false), a => seen = a)
+            .ResolveAsync(Playlist, default);
+
+        var i = seen!.ToList().IndexOf("--playlist-end");
+        Assert.Equal(YoutubeResolver.MaxPlaylistItems.ToString(), seen![i + 1]);
+    }
+
+    [Fact]
     public async Task Playlist_NonZeroExitWithUsableOutput_IsAccepted()
     {
         var r = await With(new ProcessResult(1, """{"entries":[{"id":"AAAAAAAAAAA","title":"a"}]}""", "ERROR: one entry failed", false, false))

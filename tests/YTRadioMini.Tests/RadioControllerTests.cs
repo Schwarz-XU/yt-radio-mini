@@ -1054,20 +1054,46 @@ public sealed class RadioControllerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Mix_ExpansionFailure_IsSilent_AndTheSeedKeepsPlaying()
+    public async Task Mix_ExpansionFailure_ShowsAHint_AndTheSeedKeepsPlaying()
     {
-        _resolver.Handler = (link, _) => Task.FromResult(link.Kind == LinkKind.Video
-            ? ResolveResult.Ok(new[] { new QueueItem(link.Id, link.Url, "", false) })
-            : ResolveResult.Fail(ResolveErrorKind.ParseFailed, "CAN'T PLAY"));
+        var gate = new TaskCompletionSource();
+        _resolver.Handler = async (link, _) =>
+        {
+            if (link.Kind == LinkKind.Video)
+                return ResolveResult.Ok(new[] { new QueueItem(link.Id, link.Url, "", false) });
+            await gate.Task;
+            return ResolveResult.Fail(ResolveErrorKind.Timeout, "TIMED OUT");
+        };
 
         await _radio.SubmitAsync(MixLink(A));
         await WaitLoads(1);
         _mpv.RaiseFileLoaded();
         await WaitState(PlaybackState.Playing);
-        await Task.Delay(100);
 
-        Assert.Null(_radio.State.Message);
+        gate.SetResult();
+
+        await TestSupport.WaitUntil(() => _radio.State.Message == "MIX: TIMED OUT");
+        Assert.Equal(PlaybackState.Playing, _radio.State.State);
         Assert.Equal(1, _radio.State.Count);
+    }
+
+    [Fact]
+    public async Task Mix_SkipsVideosThatAreAlreadyInTheQueue()
+    {
+        await StartPlaying(B);
+        _resolver.Handler = (link, _) => Task.FromResult(link.Kind == LinkKind.Video
+            ? ResolveResult.Ok(new[] { new QueueItem(link.Id, link.Url, "", false) })
+            : ResolveResult.Ok(new[] { Item(A), Item(B), Item(C), Item(D) }));
+
+        await _radio.SubmitAsync(MixLink(A));
+
+        await TestSupport.WaitUntil(() => _radio.State.Count == 4);
+        Assert.Equal(new[] { B, A, C, D }, Ids(_radio.State));
+
+        await _radio.SubmitAsync(MixLink(A)); // 再提交一次：种子视频按用户意愿再加一次，合辑里的其余视频不再重复
+        await TestSupport.WaitUntil(() => _radio.State.Count == 5);
+        await Task.Delay(100);
+        Assert.Equal(new[] { B, A, C, D, A }, Ids(_radio.State));
     }
 
     [Fact]

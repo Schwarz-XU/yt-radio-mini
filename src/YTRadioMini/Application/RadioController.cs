@@ -570,7 +570,7 @@ public sealed class RadioController : IRadioController
                         var rest = mixResult.Items.Where(i => i.Id != seed).ToList();
                         mixResult = ResolveResult.Ok(rest);
                     }
-                    mayStart = await ApplyAsync(link, mixResult, mayStart, quiet: true, remember: false).ConfigureAwait(false);
+                    mayStart = await ApplyAsync(link, mixResult, mayStart, quiet: true, remember: false, dedupe: true).ConfigureAwait(false);
                     continue;
                 }
 
@@ -604,17 +604,26 @@ public sealed class RadioController : IRadioController
     }
 
     /// <summary>把解析结果交给串行循环处理，返回下一个链接是否仍可以触发自动播放。</summary>
-    private async Task<bool> ApplyAsync(ParsedLink link, ResolveResult result, bool mayStart, bool quiet, bool remember)
+    private async Task<bool> ApplyAsync(ParsedLink link, ResolveResult result, bool mayStart, bool quiet, bool remember, bool dedupe = false)
     {
-        await PostSync(() => ApplyResolved(link, result, mayStart, quiet, remember)).ConfigureAwait(false);
+        await PostSync(() => ApplyResolved(link, result, mayStart, quiet, remember, dedupe)).ConfigureAwait(false);
         return mayStart && result.Items.Count == 0;
     }
 
-    private void ApplyResolved(ParsedLink link, ResolveResult result, bool allowStart, bool quiet, bool remember)
+    private void ApplyResolved(ParsedLink link, ResolveResult result, bool allowStart, bool quiet, bool remember, bool dedupe)
     {
         if (result.Failure is { } failure)
         {
-            if (quiet) return; // 合辑展开失败：种子视频已经在队列里，不打扰用户
+            if (quiet)
+            {
+                // 合辑展开失败：种子视频已经在队列里，只在 LCD 上提示一下，不改变播放状态。
+                if (HasActiveItem)
+                {
+                    _message = "MIX: " + failure.Message;
+                    Publish();
+                }
+                return;
+            }
             _ingestFailure = failure.Message;
             if (HasActiveItem)
             {
@@ -624,10 +633,14 @@ public sealed class RadioController : IRadioController
             return;
         }
 
-        if (result.Items.Count == 0) return;
+        // 合辑每次展开的结果都不一样；队列里已有的视频不再重复追加。
+        var items = dedupe
+            ? result.Items.Where(i => _queue.Items.All(q => q.Id != i.Id)).ToList()
+            : result.Items;
+        if (items.Count == 0) return;
 
         var startPlaying = allowStart && !HasActiveItem;
-        var first = _queue.Append(result.Items);
+        var first = _queue.Append(items);
         if (remember) RememberLink(link.OriginalText);
 
         if (startPlaying && first >= 0)
