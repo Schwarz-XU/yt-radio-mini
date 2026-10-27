@@ -1,27 +1,80 @@
 THIRD-PARTY NOTICES
 ===================
 
-YT Radio Mini starts the following programs as separate processes. They are not linked into
-YTRadioMini.exe. Exact versions and SHA-256 checksums are listed in DEPENDENCIES.txt.
+YT Radio Mini's own code is licensed under the GNU Lesser General Public License, version 3 or
+later (files LICENSE, COPYING.LESSER and COPYING; in the release package they are in
+licenses\yt-radio-mini). This file is about the other software that is delivered in the same
+package. It is information, not legal advice.
 
-mpv
-  Project : https://github.com/mpv-player/mpv  (Windows build by https://github.com/zhongfly/mpv-winbuild)
-  Licence : mpv is distributed under the GNU GPL version 2 or later; builds made with the
-            LGPL option are under the GNU LGPL version 2.1 or later. The build bundled here
-            statically includes FFmpeg and other libraries, each under its own licence.
-            See the licence information of the build at the project page above for the exact terms
-            that apply to the bundled mpv.exe.
-  Source  : https://github.com/mpv-player/mpv and https://github.com/zhongfly/mpv-winbuild
+How the programs fit together
+-----------------------------
+YTRadioMini.exe does not contain or link to mpv or yt-dlp. It starts mpv.exe and yt-dlp.exe as
+separate processes and talks to them through a pipe and through command-line arguments. The
+three are delivered together in one folder for convenience; they remain separate works, each
+under its own licence. Licence texts are in the "licenses" folder (see licenses/README.md).
 
-yt-dlp
-  Project : https://github.com/yt-dlp/yt-dlp
-  Licence : The Unlicense (public domain dedication). The Windows executable also contains
-            third-party components, listed in the release notes of the project.
-  Source  : https://github.com/yt-dlp/yt-dlp
+Exact versions and SHA-256 checksums of the bundled programs are in docs\DEPENDENCIES.txt of the
+release package. In the package, mpv.exe and yt-dlp.exe are in the "tools" folder.
 
-.NET
-  YTRadioMini.exe is published as a self-contained application: the .NET runtime and the
-  Windows Forms libraries (Microsoft, MIT licence) sit next to it in this folder.
-  https://github.com/dotnet/runtime  https://github.com/dotnet/winforms
 
-This notice is informational and is not legal advice.
+mpv  (mpv.exe)
+--------------
+  Version     : mpv v0.41.0-1317-g77e8f9cfa (the version string inside mpv.exe)
+  Build by    : https://github.com/zhongfly/mpv-winbuild, release 2026-10-27-77e8f9cfa1
+                (based on https://github.com/shinchiro/mpv-winbuild-cmake)
+  Upstream    : https://github.com/mpv-player/mpv
+  Licence     : According to mpv's own file "Copyright" (licenses/mpv/Copyright), mpv is licensed
+                under the GNU GPL version 2 or later by default, and under the GNU LGPL version 2.1
+                or later only if it is built without the GPL-only files (switch -Dgpl=false).
+                The bundled mpv.exe lists "gpl" among its enabled features and includes features
+                that exist only in the GPL configuration (for example dvdnav). It is therefore a
+                GPL build: treat mpv.exe as licensed under the GNU GPL, version 2 or later.
+                mpv.exe also contains statically linked libraries (FFmpeg, libass, libplacebo and many
+                others, listed in the README of https://github.com/zhongfly/mpv-winbuild), each under
+                its own licence. Some of them may require GPL version 3; if you need certainty, check
+                the build's own documentation.
+  Source code : mpv: https://github.com/mpv-player/mpv/commit/77e8f9cfa1
+                Build scripts and the versions of all libraries used in this build:
+                https://github.com/zhongfly/mpv-winbuild (release 2026-10-27-77e8f9cfa1) and
+                https://github.com/shinchiro/mpv-winbuild-cmake
+
+
+yt-dlp  (yt-dlp.exe)
+--------------------
+  Version     : 2026.10.26
+  Project     : https://github.com/yt-dlp/yt-dlp
+  Licence     : yt-dlp's own code is released into the public domain under the Unlicense
+                (licenses/yt-dlp/LICENSE). According to the yt-dlp README, the PyInstaller-built
+                executables (which is what yt-dlp.exe is) include GPLv3+ licensed code, and the
+                combined work is licensed under the GNU GPL version 3 or later (licenses/GPL-3.0.txt).
+                The licences of all components inside yt-dlp.exe (Python and others) are collected in
+                licenses/yt-dlp/THIRD_PARTY_LICENSES.txt.
+  Source code : https://github.com/yt-dlp/yt-dlp/tree/2026.10.26
+                The yt-dlp maintainers state in THIRD_PARTY_LICENSES.txt that source code of bundled
+                third-party components is available from the original projects, and that they will
+                provide it on request (maintainers@yt-dlp.org).
+  Note        : yt-dlp's README describes a JavaScript runtime (Deno is the recommended one) and
+                "yt-dlp-ejs" as needed for full YouTube support. This package does not include a
+                JavaScript runtime. See README.txt.
+
+
+.NET runtime and Windows Forms  (inside YTRadioMini.exe)
+---------------------------------------------------------------------------------
+  YTRadioMini.exe is published as a self-contained single-file application, so the .NET 10 runtime
+  and the Windows Forms libraries from Microsoft are inside the exe.
+  Licence     : MIT (licenses/dotnet/LICENSE.TXT). Notices for third-party code inside the runtime:
+                licenses/dotnet/THIRD-PARTY-NOTICES.TXT.
+  Source code : https://github.com/dotnet/runtime and https://github.com/dotnet/winforms
+
+
+Source code for the GPL-licensed programs
+-----------------------------------------
+Where the licence of a bundled program requires it, the corresponding source code is available at
+the addresses given above. If you received this package and cannot obtain the source code of mpv.exe
+or yt-dlp.exe from those addresses, open an issue at
+https://github.com/Schwarz-XU/yt-radio-mini/issues and ask for it. The source code will be provided
+or its location pointed out.
+
+If you do not want to receive mpv.exe and yt-dlp.exe from this package, you can delete them and put
+your own copies of the programs (from https://mpv.io and https://github.com/yt-dlp/yt-dlp/releases)
+in the "tools" folder, or in a folder on the PATH.

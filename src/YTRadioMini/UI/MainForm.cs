@@ -96,7 +96,7 @@ public sealed class MainForm : Form
     private const int WM_NCLBUTTONDOWN = 0x00A1;
     private const int HTCAPTION = 2;
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
-    private const int DWMWCP_ROUND = 2;
+    private const int DWMWCP_DONOTROUND = 1;
 
     protected override CreateParams CreateParams
     {
@@ -115,13 +115,14 @@ public sealed class MainForm : Form
         base.OnHandleCreated(e);
         try
         {
-            // Windows 11：让系统把窗口角画成圆角（边缘平滑）。
-            var preference = DWMWCP_ROUND;
+            // Windows 11 会自己给窗口裁圆角，半径随系统设置而定。外壳是我们自己画的，
+            // 为了让轮廓和窗口形状在任何缩放比例下都完全一致，关掉系统圆角，改由下面的窗口区域统一裁剪。
+            var preference = DWMWCP_DONOTROUND;
             DwmSetWindowAttribute(Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
         }
         catch (Exception e2) when (e2 is DllNotFoundException or EntryPointNotFoundException)
         {
-            // 较旧的系统没有这个接口：下面用 Region 兜底。
+            // 较旧的系统没有这个接口，本来也不会自动画圆角。
         }
         ApplyRoundedShape();
     }
@@ -132,15 +133,13 @@ public sealed class MainForm : Form
         ApplyRoundedShape();
     }
 
-    /// <summary>Windows 11 之前的系统不会自动画圆角，用窗口区域裁出圆角（边缘没有抗锯齿，但只有四个小角）。</summary>
+    /// <summary>
+    /// 用窗口区域把窗口四角裁成与外壳轮廓相同的圆角（半径 8 个基准单位，随 DPI 缩放）。
+    /// 区域的边缘没有抗锯齿，但只有四个小角，而且轮廓线正好画在边缘内侧。
+    /// </summary>
     private void ApplyRoundedShape()
     {
         if (!IsHandleCreated || WindowState == FormWindowState.Minimized) return;
-        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
-        {
-            Region = null;
-            return;
-        }
 
         var radius = RadioSurface.WindowRadius * (Width / RadioSurface.BaseWidth);
         using var path = RadioSurface.RoundedRect(new RectangleF(0, 0, Width, Height), radius);

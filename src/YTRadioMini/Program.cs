@@ -66,10 +66,17 @@ internal static class Program
             new StorageService(StorageService.DefaultPath));
     }
 
-    /// <summary>优先使用程序目录（便携包布局）下的文件，找不到则交给系统 PATH 查找。</summary>
+    /// <summary>
+    /// 查找 mpv.exe / yt-dlp.exe。顺序：程序所在文件夹的 tools 子文件夹（发布包的布局）、
+    /// 程序所在文件夹（开发时直接放在输出目录）、最后交给系统 PATH 查找。
+    /// </summary>
     private static string FindTool(string fileName)
     {
-        var local = Path.Combine(AppContext.BaseDirectory, fileName);
-        return File.Exists(local) ? local : fileName;
+        foreach (var directory in new[] { Path.Combine(AppContext.BaseDirectory, "tools"), AppContext.BaseDirectory })
+        {
+            var candidate = Path.Combine(directory, fileName);
+            if (File.Exists(candidate)) return candidate;
+        }
+        return fileName;
     }
 }

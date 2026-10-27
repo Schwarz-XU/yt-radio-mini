@@ -1,0 +1,18 @@
+YT Radio Mini
+Copyright (C) 2026 Schwarz-XU
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU Lesser General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
+
+The full text of the GNU Lesser General Public License, version 3, is in the file
+COPYING.LESSER. It is an addition to the GNU General Public License, version 3, whose
+text is in the file COPYING.
+
+This licence covers the source code of YT Radio Mini itself. The release package also
+contains other programs (mpv.exe, yt-dlp.exe and the .NET runtime). They are separate
+works under their own licences; see THIRD-PARTY-NOTICES.txt.

@@ -1,12 +1,12 @@
-# YT Radio Mini 1.0.0: test report
+# YT Radio Mini 0.1.0: test report
 
-Status at the time of writing: **release candidate, not yet signed off.** Automated tests pass; the
-real-world checks are partly done by the project owner and partly still open (see below).
+Status at the time of writing: **first public release (0.1.0).** Automated tests pass; the real-world
+checks are partly done by the project owner and partly still open (see below).
 
 ## 1. Automated tests
 
 Run on Linux (x64) with the .NET SDK 10.0.113; `mpv` 0.37 was installed for the integration tests.
-Windows-only code (WinForms, the Windows Job Object, DWM rounded corners, the Windows named-pipe path of
+Windows-only code (WinForms, the Windows Job Object, the window-region corners, the Windows named-pipe path of
 mpv) is **not** exercised by them.
 
 Result: **280 passed, 0 failed, 0 skipped** (`dotnet test tests/YTRadioMini.Tests -c Release`, about 45 s).
@@ -33,6 +33,7 @@ Reported by the project owner during development (the exact builds and links wer
   Shorts links, multi-line input, queue list editing: **worked**.
 - Closing the window leaves no `mpv.exe` or `yt-dlp.exe` behind: **verified**.
 - After a restart the queue and position are restored: **verified**.
+- A first look at the borderless window (screenshot): the layout, colours, lamp, buttons and queue/LCD text render as designed.
 - Resource use while playing, as reported: GUI about 15 MB, mpv about 54 MB, CPU close to 0.
   Which memory figure was read (Task Manager "Memory" or working set), the Windows version and whether
   `yt-dlp` was running were not stated. Use `scripts/measure-performance.ps1` for a repeatable number.
@@ -41,7 +42,8 @@ Reported by the project owner during development (the exact builds and links wer
 
 | Item | Why it matters |
 |---|---|
-| The borderless window, new palette, window buttons, dragging and the application icon | Added after the last real-world test; only compiled so far |
+| The borderless window, window buttons, dragging, the application icon and the rounded corners | Added after the last real-world test. The owner's first look at the borderless window showed a second, smaller corner radius behind the drawn one; the window shape and the drawn outline now use the same radius, which has not been looked at on Windows yet |
+| The single-file package layout (`YTRadioMini.exe` with the runtime inside, tools in `tools\`) | Built and inspected on Linux only; start-up time of the single-file exe on Windows is unknown |
 | Single-instance start-up on Windows (second start brings the first window to the front) | Unit-tested through the shared code; the foreground switch itself is Windows-only |
 | Killing `YTRadioMini.exe` from Task Manager takes `mpv.exe`/`yt-dlp.exe` with it | Relies on a Windows Job Object that has not been run on Windows |
 | `LIVE` marker on a real YouTube live stream | Heuristic based on mpv's `duration`; tested only with local streams |

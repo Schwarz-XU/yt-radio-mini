@@ -20,7 +20,11 @@ public sealed class RadioSurface : Control
     private const int ListRows = 4;
     private const float ListHeaderHeight = 24f;   // 相对 LCD 内框顶部：列表第一行的起点
     private const float ListRowHeight = 15f;
-    public const float WindowRadius = 14f;
+    /// <summary>
+    /// 窗口圆角半径（基准坐标）。取 Windows 11 系统圆角的默认半径 8：系统会用这个半径裁剪窗口，
+    /// 我们画的外壳轮廓必须与它一致，否则轮廓和系统裁剪之间会露出第二层半径不同的圆角。
+    /// </summary>
+    public const float WindowRadius = 8f;
 
     private static readonly RectangleF LcdRect = new(14, 20, 332, 92);      // 黑色边框，整块 LCD 的点击区域
     private static readonly RectangleF LcdInner = new(18, 24, 324, 84);     // 荧光显示区
@@ -260,7 +264,7 @@ public sealed class RadioSurface : Control
     {
         const float inset = 0.5f;
         var outline = new RectangleF(inset, inset, BaseWidth - 1, BaseHeight - 1);
-        using var path = RoundedRect(outline, WindowRadius);
+        using var path = RoundedRect(outline, WindowRadius - inset);
         using var edge = new Pen(RetroTheme.ShellEdge, 1);
         using var light = new Pen(RetroTheme.ShellHighlight, 1);
         using var shade = new Pen(RetroTheme.ShellShadow, 2);
