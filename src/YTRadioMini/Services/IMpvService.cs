@@ -28,6 +28,12 @@ public interface IMpvService : IAsyncDisposable
     event Action<string>? MediaTitleChanged;
     event Action<string>? ProcessExited;
 
+    /// <summary>
+    /// 文件加载后的数秒内判断出是否为直播（启发式，依据 mpv 的 duration 属性）。
+    /// 每个文件至多触发一次，且只在该文件仍是当前文件时触发；true 会比 false 早出现。
+    /// </summary>
+    event Action<bool>? LiveDetected;
+
     /// <summary>启动 mpv 并连接 IPC。重复调用在已运行时不做任何事。</summary>
     Task StartAsync(CancellationToken ct);
 

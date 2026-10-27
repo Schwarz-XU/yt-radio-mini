@@ -12,6 +12,7 @@ public sealed class FakeMpvService : IMpvService
     public event Action<bool>? PauseChanged;
     public event Action<string>? MediaTitleChanged;
     public event Action<string>? ProcessExited;
+    public event Action<bool>? LiveDetected;
 
     public Task StartAsync(CancellationToken ct) { Commands.Add("start"); return Task.CompletedTask; }
     public Task LoadAsync(string url, CancellationToken ct) { Commands.Add($"load {url}"); return Task.CompletedTask; }
@@ -23,5 +24,6 @@ public sealed class FakeMpvService : IMpvService
     public void RaiseEndFile(MpvEndFile e) => EndFile?.Invoke(e);
     public void RaisePauseChanged(bool paused) => PauseChanged?.Invoke(paused);
     public void RaiseMediaTitle(string title) => MediaTitleChanged?.Invoke(title);
+    public void RaiseLiveDetected(bool live) => LiveDetected?.Invoke(live);
     public void RaiseProcessExited(string reason) => ProcessExited?.Invoke(reason);
 }
