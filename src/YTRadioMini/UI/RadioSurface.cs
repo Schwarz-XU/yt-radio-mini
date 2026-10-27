@@ -18,15 +18,26 @@ public sealed class RadioSurface : Control
     public const float BaseHeight = 240f;
 
     private const int ListRows = 4;
-    private const float ListHeaderHeight = 24f;
+    private const float ListHeaderHeight = 24f;   // 相对 LCD 内框顶部：列表第一行的起点
     private const float ListRowHeight = 15f;
+    public const float WindowRadius = 14f;
 
-    private static readonly RectangleF LcdRect = new(16, 14, 328, 92);
-    private static readonly RectangleF GrilleRect = new(18, 122, 104, 56);
-    private static readonly RectangleF PrevRect = new(136, 122, 52, 52);
-    private static readonly RectangleF PlayRect = new(198, 122, 52, 52);
-    private static readonly RectangleF NextRect = new(260, 122, 52, 52);
-    private static readonly RectangleF LampRect = new(326, 142, 12, 12);
+    private static readonly RectangleF LcdRect = new(14, 20, 332, 92);      // 黑色边框，整块 LCD 的点击区域
+    private static readonly RectangleF LcdInner = new(18, 24, 324, 84);     // 荧光显示区
+    private static readonly RectangleF GrilleRect = new(18, 126, 104, 52);
+    private static readonly RectangleF PrevRect = new(136, 126, 52, 52);
+    private static readonly RectangleF PlayRect = new(198, 126, 52, 52);
+    private static readonly RectangleF NextRect = new(260, 126, 52, 52);
+    private static readonly RectangleF LampRing = new(324, 144, 16, 16);
+    private static readonly RectangleF LampBody = new(326, 146, 12, 12);
+    private static readonly PointF MinimizeCenter = new(322.5f, 9.5f);
+    private static readonly PointF CloseCenter = new(341.5f, 9.5f);
+    private const float WindowButtonDiameter = 13f;
+    private const float WindowButtonHitRadius = 10f;
+    private static readonly RectangleF NoteRect = new(18, 181, 324, 14);
+
+    /// <summary>输入框在窗口中的位置（基准坐标），由窗体用来摆放文本框。</summary>
+    public static readonly RectangleF InputRect = new(16, 197, 328, 28);
 
     private readonly Font _positionFont = MakeFont(11, FontStyle.Regular);
     private readonly Font _tagFont = MakeFont(11, FontStyle.Bold);
@@ -43,7 +54,7 @@ public sealed class RadioSurface : Control
     private string _inputNote = "";
     private bool _listMode;
 
-    private enum Button { Previous, Play, Next }
+    private enum Button { Previous, Play, Next, Minimize, Close }
 
     public RadioSurface()
     {
@@ -53,6 +64,12 @@ public sealed class RadioSurface : Control
         AccessibleName = "YT Radio Mini";
         AccessibleRole = AccessibleRole.Client;
     }
+
+    public event Action? MinimizeClicked;
+    public event Action? CloseClicked;
+
+    /// <summary>在机身空白处按下鼠标：窗体据此开始拖动窗口。</summary>
+    public event Action? DragRequested;
 
     public event Action? PreviousClicked;
     public event Action? PlayPauseClicked;
@@ -216,6 +233,8 @@ public sealed class RadioSurface : Control
             g.ScaleTransform(ScaleFactor, ScaleFactor);
 
             DrawShell(g);
+            DrawWindowButton(g, MinimizeCenter, Button.Minimize);
+            DrawWindowButton(g, CloseCenter, Button.Close);
             if (_listMode) DrawQueueLcd(g, _view);
             else DrawLcd(g, _view);
             DrawGrille(g);
@@ -226,8 +245,8 @@ public sealed class RadioSurface : Control
 
             if (_inputNote.Length > 0)
             {
-                using var note = new SolidBrush(RetroTheme.SecondaryText);
-                g.DrawString(_inputNote, _messageFont, note, new RectangleF(18, 178, 324, 14), _lineFormat);
+                using var note = new SolidBrush(RetroTheme.NoteText);
+                g.DrawString(_inputNote, _messageFont, note, NoteRect, _lineFormat);
             }
         }
         catch (Exception)
@@ -236,70 +255,78 @@ public sealed class RadioSurface : Control
         }
     }
 
+    /// <summary>外壳：圆角轮廓，顶部一道高光，底部一道阴影。</summary>
     private static void DrawShell(Graphics g)
     {
-        using var light = new Pen(RetroTheme.Blend(RetroTheme.Shell, Color.White, 0.35f), 2);
-        using var dark = new Pen(RetroTheme.Blend(RetroTheme.Shell, Color.Black, 0.25f), 2);
-        g.DrawLine(light, 1, 1, BaseWidth - 2, 1);
-        g.DrawLine(light, 1, 1, 1, BaseHeight - 2);
-        g.DrawLine(dark, 1, BaseHeight - 1, BaseWidth - 1, BaseHeight - 1);
-        g.DrawLine(dark, BaseWidth - 1, 1, BaseWidth - 1, BaseHeight - 1);
+        const float inset = 0.5f;
+        var outline = new RectangleF(inset, inset, BaseWidth - 1, BaseHeight - 1);
+        using var path = RoundedRect(outline, WindowRadius);
+        using var edge = new Pen(RetroTheme.ShellEdge, 1);
+        using var light = new Pen(RetroTheme.ShellHighlight, 1);
+        using var shade = new Pen(RetroTheme.ShellShadow, 2);
+
+        g.DrawLine(light, WindowRadius, 1.5f, BaseWidth - WindowRadius, 1.5f);
+        g.DrawLine(shade, WindowRadius, BaseHeight - 2.5f, BaseWidth - WindowRadius, BaseHeight - 2.5f);
+        g.DrawPath(edge, path);
     }
 
-    private static void DrawLcdBackground(Graphics g)
+    private static void DrawLcdFrame(Graphics g)
     {
-        using var bezelPath = RoundedRect(Inflate(LcdRect, 3), 10);
-        using var lcdPath = RoundedRect(LcdRect, 7);
-        using var bezel = new SolidBrush(RetroTheme.Blend(RetroTheme.Shell, Color.Black, 0.35f));
+        using var bezelPath = RoundedRect(LcdRect, 12);
+        using var innerPath = RoundedRect(LcdInner, 8);
+        using var bezel = new SolidBrush(RetroTheme.LcdBezel);
+        using var bezelLight = new Pen(RetroTheme.LcdBezelHighlight, 1);
         using var lcd = new SolidBrush(RetroTheme.LcdBackground);
+        using var inset = new Pen(RetroTheme.LcdShadow, 2);
+
         g.FillPath(bezel, bezelPath);
-        g.FillPath(lcd, lcdPath);
+        g.DrawLine(bezelLight, LcdRect.Left + 12, LcdRect.Top + 0.5f, LcdRect.Right - 12, LcdRect.Top + 0.5f);
+        g.FillPath(lcd, innerPath);
+        g.DrawLine(inset, LcdInner.Left + 8, LcdInner.Top + 1, LcdInner.Right - 8, LcdInner.Top + 1); // 凹进去的上沿阴影
     }
 
     private void DrawLcd(Graphics g, RadioViewState v)
     {
-        DrawLcdBackground(g);
+        DrawLcdFrame(g);
 
-        var text = RetroTheme.LcdText;
-        using var normal = new SolidBrush(text);
-        using var dim = new SolidBrush(Color.FromArgb(170, text));
+        using var normal = new SolidBrush(RetroTheme.LcdText);
+        using var dim = new SolidBrush(RetroTheme.LcdDim);
 
-        var left = LcdRect.Left + 10;
-        var width = LcdRect.Width - 20;
+        var left = LcdInner.Left + 10;
+        var width = LcdInner.Width - 20;
 
         // 第一行：队列位置 + 状态标记
         var position = v.Count > 0 ? $"{v.Position:00} / {v.Count:00}" : "-- / --";
-        g.DrawString(position, _positionFont, dim, new RectangleF(left, LcdRect.Top + 6, 110, 16), _lineFormat);
+        g.DrawString(position, _positionFont, dim, new RectangleF(left, LcdInner.Top + 7, 110, 16), _lineFormat);
 
         var tag = TagFor(v);
         if (tag.Length > 0)
-            g.DrawString(tag, _tagFont, normal, new RectangleF(left + 110, LcdRect.Top + 6, width - 110, 16), _rightFormat);
+            g.DrawString(tag, _tagFont, normal, new RectangleF(left + 110, LcdInner.Top + 7, width - 110, 16), _rightFormat);
 
         // 标题：最多两行，超出部分截断
-        g.DrawString(v.Title, _titleFont, normal, new RectangleF(left, LcdRect.Top + 26, width, 38), _titleFormat);
+        g.DrawString(v.Title, _titleFont, normal, new RectangleF(left, LcdInner.Top + 27, width, 36), _titleFormat);
 
         // 最后一行：简短的错误或提示
         if (!string.IsNullOrEmpty(v.Message))
-            g.DrawString(v.Message, _messageFont, dim, new RectangleF(left, LcdRect.Bottom - 22, width, 16), _lineFormat);
+            g.DrawString(v.Message, _messageFont, dim, new RectangleF(left, LcdInner.Top + 65, width, 16), _lineFormat);
     }
 
     private void DrawQueueLcd(Graphics g, RadioViewState v)
     {
-        DrawLcdBackground(g);
+        DrawLcdFrame(g);
 
-        var text = RetroTheme.LcdText;
-        using var normal = new SolidBrush(text);
-        using var dim = new SolidBrush(Color.FromArgb(170, text));
+        using var normal = new SolidBrush(RetroTheme.LcdText);
+        using var dim = new SolidBrush(RetroTheme.LcdDim);
         using var inverse = new SolidBrush(RetroTheme.LcdBackground);
 
-        var left = LcdRect.Left + 10;
-        var width = LcdRect.Width - 20;
+        var left = LcdInner.Left + 10;
+        var width = LcdInner.Width - 20;
         var items = v.Queue ?? Array.Empty<QueueItem>();
 
         g.DrawString($"QUEUE {(items.Count == 0 ? 0 : _browser.Cursor + 1):00}/{items.Count:00}", _positionFont, dim,
-            new RectangleF(left, LcdRect.Top + 6, 110, 16), _lineFormat);
+            new RectangleF(left, LcdInner.Top + 7, 110, 16), _lineFormat);
         g.DrawString("ENTER:PLAY DEL:REMOVE", _messageFont, dim,
-            new RectangleF(left + 110, LcdRect.Top + 6, width - 110, 16), _rightFormat);
+            new RectangleF(left + 110, LcdInner.Top + 7, width - 110, 16), _rightFormat);
 
         var playing = v.Position - 1;
         for (var row = 0; row < ListRows; row++)
@@ -309,14 +336,18 @@ public sealed class RadioSurface : Control
 
             var item = items[index];
             var selected = index == _browser.Cursor;
-            var rowRect = new RectangleF(LcdRect.Left + 6, LcdRect.Top + ListHeaderHeight + row * ListRowHeight, LcdRect.Width - 12, ListRowHeight);
+            var rowRect = new RectangleF(LcdInner.Left + 4, LcdInner.Top + ListHeaderHeight + row * ListRowHeight, LcdInner.Width - 8, ListRowHeight);
 
-            if (selected) g.FillRectangle(normal, rowRect);
+            if (selected)
+            {
+                using var path = RoundedRect(rowRect, 2);
+                g.FillPath(normal, path);
+            }
 
             var label = string.IsNullOrWhiteSpace(item.Title) ? $"({item.Id})" : item.Title;
             var marker = index == playing ? '>' : ' ';
             g.DrawString($"{marker}{index + 1:000} {label}", _rowFont, selected ? inverse : normal,
-                new RectangleF(rowRect.X + 2, rowRect.Y, rowRect.Width - 4, rowRect.Height), _lineFormat);
+                new RectangleF(rowRect.X + 6, rowRect.Y, rowRect.Width - 12, rowRect.Height), _lineFormat);
         }
     }
 
@@ -328,16 +359,16 @@ public sealed class RadioSurface : Control
 
     private static void DrawGrille(Graphics g)
     {
-        using var slot = new SolidBrush(RetroTheme.Blend(RetroTheme.Shell, Color.Black, 0.28f));
-        using var highlight = new SolidBrush(RetroTheme.Blend(RetroTheme.Shell, Color.White, 0.3f));
+        using var slot = new SolidBrush(RetroTheme.Slot);
+        using var highlight = new SolidBrush(RetroTheme.ShellHighlight);
         const int rows = 6;
-        var step = GrilleRect.Height / rows;
+        var step = (GrilleRect.Height - 4) / (rows - 1);
         for (var i = 0; i < rows; i++)
         {
-            var y = GrilleRect.Top + i * step + 2;
+            var y = GrilleRect.Top + i * step;
+            g.FillRectangle(highlight, GrilleRect.Left + 2, y + 4, GrilleRect.Width - 4, 1);
             using var path = RoundedRect(new RectangleF(GrilleRect.Left, y, GrilleRect.Width, 4), 2);
             g.FillPath(slot, path);
-            g.FillRectangle(highlight, GrilleRect.Left + 2, y + 5, GrilleRect.Width - 4, 1);
         }
     }
 
@@ -346,40 +377,65 @@ public sealed class RadioSurface : Control
         var pressed = _pressed == which && enabled;
         var r = pressed ? new RectangleF(rect.X, rect.Y + 1, rect.Width, rect.Height) : rect;
 
-        var fill = pressed ? RetroTheme.Blend(RetroTheme.Button, Color.Black, 0.2f) : RetroTheme.Button;
-        using var shadow = new SolidBrush(RetroTheme.Blend(RetroTheme.Shell, Color.Black, 0.3f));
-        using var body = new SolidBrush(fill);
-        using var rim = new Pen(RetroTheme.Blend(RetroTheme.Button, Color.Black, 0.45f), 2);
+        using var shadow = new SolidBrush(RetroTheme.Slot);
+        using var body = new SolidBrush(pressed ? RetroTheme.Blend(RetroTheme.Button, Color.Black, 0.2f) : RetroTheme.Button);
+        using var ring = new Pen(enabled ? RetroTheme.Brass : RetroTheme.ButtonDisabled, 2);
 
         if (!pressed) g.FillEllipse(shadow, r.X, r.Y + 3, r.Width, r.Height);
         g.FillEllipse(body, r);
-        g.DrawEllipse(rim, r);
+        g.DrawEllipse(ring, RectangleF.Inflate(r, -1, -1));
 
-        var icon = enabled ? RetroTheme.LcdText : RetroTheme.Blend(RetroTheme.Button, RetroTheme.LcdText, 0.3f);
-        using var iconBrush = new SolidBrush(icon);
+        using var icon = new SolidBrush(enabled ? RetroTheme.ButtonIcon : RetroTheme.ButtonDisabled);
         var cx = r.X + r.Width / 2;
         var cy = r.Y + r.Height / 2;
 
         switch (which)
         {
             case Button.Play when _view.State == PlaybackState.Playing:
-                g.FillRectangle(iconBrush, cx - 9, cy - 11, 6, 22);
-                g.FillRectangle(iconBrush, cx + 3, cy - 11, 6, 22);
+                g.FillRectangle(icon, cx - 8, cy - 11, 6, 22);
+                g.FillRectangle(icon, cx + 2, cy - 11, 6, 22);
                 break;
 
             case Button.Play:
-                g.FillPolygon(iconBrush, new[] { new PointF(cx - 8, cy - 12), new PointF(cx - 8, cy + 12), new PointF(cx + 12, cy) });
+                g.FillPolygon(icon, new[] { new PointF(cx - 6, cy - 12), new PointF(cx - 6, cy + 12), new PointF(cx + 12, cy) });
                 break;
 
             case Button.Next:
-                g.FillPolygon(iconBrush, new[] { new PointF(cx - 11, cy - 11), new PointF(cx - 11, cy + 11), new PointF(cx + 5, cy) });
-                g.FillRectangle(iconBrush, cx + 7, cy - 11, 4, 22);
+                g.FillPolygon(icon, new[] { new PointF(cx - 7, cy - 10), new PointF(cx - 7, cy + 10), new PointF(cx + 7, cy) });
+                g.FillRectangle(icon, cx + 7, cy - 10, 3, 20);
                 break;
 
             case Button.Previous:
-                g.FillPolygon(iconBrush, new[] { new PointF(cx + 11, cy - 11), new PointF(cx + 11, cy + 11), new PointF(cx - 5, cy) });
-                g.FillRectangle(iconBrush, cx - 11, cy - 11, 4, 22);
+                g.FillPolygon(icon, new[] { new PointF(cx + 7, cy - 10), new PointF(cx + 7, cy + 10), new PointF(cx - 7, cy) });
+                g.FillRectangle(icon, cx - 10, cy - 10, 3, 20);
                 break;
+        }
+    }
+
+    /// <summary>右上角的最小化与关闭：黄铜边的小圆钮，跟机身上的按钮同一语言。</summary>
+    private void DrawWindowButton(Graphics g, PointF center, Button which)
+    {
+        var pressed = _pressed == which;
+        var r = new RectangleF(center.X - WindowButtonDiameter / 2, center.Y - WindowButtonDiameter / 2 + (pressed ? 0.5f : 0),
+            WindowButtonDiameter, WindowButtonDiameter);
+
+        using var body = new SolidBrush(pressed ? RetroTheme.Blend(RetroTheme.Button, Color.Black, 0.25f) : RetroTheme.Button);
+        using var ring = new Pen(RetroTheme.Brass, 1);
+        using var glyph = new Pen(RetroTheme.ButtonIcon, 1.5f);
+
+        g.FillEllipse(body, r);
+        g.DrawEllipse(ring, RectangleF.Inflate(r, -0.5f, -0.5f));
+
+        var cx = r.X + r.Width / 2;
+        var cy = r.Y + r.Height / 2;
+        if (which == Button.Minimize)
+        {
+            g.DrawLine(glyph, cx - 3, cy, cx + 3, cy);
+        }
+        else
+        {
+            g.DrawLine(glyph, cx - 3, cy - 3, cx + 3, cy + 3);
+            g.DrawLine(glyph, cx - 3, cy + 3, cx + 3, cy - 3);
         }
     }
 
@@ -391,17 +447,15 @@ public sealed class RadioSurface : Control
             PlaybackState.Loading or PlaybackState.Resolving => RetroTheme.LampAmber,
             _ => RetroTheme.LampGray, // 待机、暂停、停止、出错
         };
-        using var ring = new SolidBrush(RetroTheme.Blend(RetroTheme.Shell, Color.Black, 0.4f));
+        using var ring = new SolidBrush(RetroTheme.LcdBezel);
         using var body = new SolidBrush(color);
-        using var glint = new SolidBrush(Color.FromArgb(90, Color.White));
-        g.FillEllipse(ring, Inflate(LampRect, 2));
-        g.FillEllipse(body, LampRect);
-        g.FillEllipse(glint, LampRect.X + 2.5f, LampRect.Y + 2f, 3.5f, 3.5f);
+        using var glint = new SolidBrush(Color.FromArgb(120, Color.White));
+        g.FillEllipse(ring, LampRing);
+        g.FillEllipse(body, LampBody);
+        g.FillEllipse(glint, LampBody.X + 2f, LampBody.Y + 2f, 4f, 4f);
     }
 
-    private static RectangleF Inflate(RectangleF r, float d) => RectangleF.Inflate(r, d, d);
-
-    private static GraphicsPath RoundedRect(RectangleF r, float radius)
+    public static GraphicsPath RoundedRect(RectangleF r, float radius)
     {
         var d = radius * 2;
         var path = new GraphicsPath();
@@ -420,26 +474,31 @@ public sealed class RadioSurface : Control
     private Button? HitTestButton(Point p)
     {
         var b = ToBase(p);
-        if (Contains(PrevRect, b)) return Button.Previous;
-        if (Contains(PlayRect, b)) return Button.Play;
-        if (Contains(NextRect, b)) return Button.Next;
+        if (Near(MinimizeCenter, b, WindowButtonHitRadius)) return Button.Minimize;
+        if (Near(CloseCenter, b, WindowButtonHitRadius)) return Button.Close;
+        if (InCircle(PrevRect, b)) return Button.Previous;
+        if (InCircle(PlayRect, b)) return Button.Play;
+        if (InCircle(NextRect, b)) return Button.Next;
         return null;
     }
 
-    /// <summary>用外接圆做命中判断，使点击区域与圆形按钮一致。</summary>
-    private static bool Contains(RectangleF r, PointF p)
+    private static bool Near(PointF center, PointF p, float radius)
     {
-        var dx = p.X - (r.X + r.Width / 2);
-        var dy = p.Y - (r.Y + r.Height / 2);
-        return dx * dx + dy * dy <= r.Width * r.Width / 4;
+        var dx = p.X - center.X;
+        var dy = p.Y - center.Y;
+        return dx * dx + dy * dy <= radius * radius;
     }
+
+    /// <summary>用外接圆做命中判断，使点击区域与圆形按钮一致。</summary>
+    private static bool InCircle(RectangleF r, PointF p) =>
+        Near(new PointF(r.X + r.Width / 2, r.Y + r.Height / 2), p, r.Width / 2);
 
     /// <summary>列表模式下，鼠标位置对应的队列索引；不在条目行上时返回 -1。</summary>
     private int ListIndexAt(Point p)
     {
         var b = ToBase(p);
-        if (!LcdRect.Contains(b)) return -1;
-        var row = (int)Math.Floor((b.Y - LcdRect.Top - ListHeaderHeight) / ListRowHeight);
+        if (!LcdInner.Contains(b)) return -1;
+        var row = (int)Math.Floor((b.Y - LcdInner.Top - ListHeaderHeight) / ListRowHeight);
         return row < 0 ? -1 : _browser.IndexAtRow(row);
     }
 
@@ -447,7 +506,8 @@ public sealed class RadioSurface : Control
     {
         Button.Previous => _view.CanPrevious,
         Button.Play => _view.CanTogglePause,
-        _ => _view.CanNext,
+        Button.Next => _view.CanNext,
+        _ => true, // 最小化、关闭
     };
 
     protected override void OnMouseDown(MouseEventArgs e)
@@ -465,11 +525,15 @@ public sealed class RadioSurface : Control
             return;
         }
 
-        if (!LcdRect.Contains(ToBase(e.Location))) return;
+        if (LcdRect.Contains(ToBase(e.Location)))
+        {
+            if (!_listMode) OpenList();
+            else if (ListIndexAt(e.Location) is var index and >= 0) { _browser.SetCursor(index); Invalidate(); }
+            else if (ToBase(e.Location).Y < LcdInner.Top + ListHeaderHeight) CloseList(); // 点击标题栏：返回播放显示
+            return;
+        }
 
-        if (!_listMode) OpenList();
-        else if (ListIndexAt(e.Location) is var index and >= 0) { _browser.SetCursor(index); Invalidate(); }
-        else if (ToBase(e.Location).Y < LcdRect.Top + ListHeaderHeight) CloseList(); // 点击标题栏：返回播放显示
+        DragRequested?.Invoke(); // 机身上的其余位置：按住拖动窗口
     }
 
     protected override void OnMouseDoubleClick(MouseEventArgs e)
@@ -506,7 +570,9 @@ public sealed class RadioSurface : Control
             {
                 case Button.Previous: PreviousClicked?.Invoke(); break;
                 case Button.Play: PlayPauseClicked?.Invoke(); break;
-                default: NextClicked?.Invoke(); break;
+                case Button.Next: NextClicked?.Invoke(); break;
+                case Button.Minimize: MinimizeClicked?.Invoke(); break;
+                case Button.Close: CloseClicked?.Invoke(); break;
             }
         }
     }

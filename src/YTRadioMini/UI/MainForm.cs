@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using YTRadioMini.AppLogic;
 using YTRadioMini.Models;
 
@@ -21,10 +22,13 @@ public sealed class MainForm : Form
     {
         _radio = radio;
 
+        // 没有系统标题栏：窗口就是收音机本身，最小化与关闭按钮画在机身右上角。
+        // Text 不会显示在窗口里，只用于任务栏悬停提示、Alt+Tab 和屏幕阅读器。
         Text = "YT Radio Mini";
-        FormBorderStyle = FormBorderStyle.FixedSingle;
+        FormBorderStyle = FormBorderStyle.None;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
+        Icon = LoadIcon();
         AutoScaleMode = AutoScaleMode.None; // 缩放由 ApplyScale 和 RadioSurface 的自绘负责
         BackColor = RetroTheme.Shell;
         KeyPreview = true;
@@ -39,12 +43,16 @@ public sealed class MainForm : Form
         _input.MaxLength = 20000;
         _input.BorderStyle = BorderStyle.FixedSingle;
         _input.BackColor = RetroTheme.InputBackground;
+        _input.ForeColor = RetroTheme.InputText;
         _input.AccessibleName = "YouTube link";
 
         Controls.Add(_input);
         Controls.Add(_surface);
         _input.BringToFront();
 
+        _surface.MinimizeClicked += () => WindowState = FormWindowState.Minimized;
+        _surface.CloseClicked += Close;
+        _surface.DragRequested += BeginWindowDrag;
         _surface.PreviousClicked += () => Fire(_radio.PreviousAsync);
         _surface.PlayPauseClicked += () => Fire(_radio.TogglePauseAsync);
         _surface.NextClicked += () => Fire(_radio.NextAsync);
@@ -77,12 +85,115 @@ public sealed class MainForm : Form
         var s = dpi / 96f;
         ClientSize = new Size((int)Math.Round(RadioSurface.BaseWidth * s), (int)Math.Round(RadioSurface.BaseHeight * s));
         LayoutInput();
+        ApplyRoundedShape();
     }
+
+    // ───────────── 无边框窗口 ─────────────
+
+    private const int WS_MINIMIZEBOX = 0x00020000;
+    private const int WS_SYSMENU = 0x00080000;
+    private const int CS_DROPSHADOW = 0x00020000;
+    private const int WM_NCLBUTTONDOWN = 0x00A1;
+    private const int HTCAPTION = 2;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            // 无边框窗口默认不能通过点击任务栏图标来最小化/还原，也没有系统菜单；补上这两个样式。
+            cp.Style |= WS_MINIMIZEBOX | WS_SYSMENU;
+            cp.ClassStyle |= CS_DROPSHADOW; // 轻微的窗口阴影
+            return cp;
+        }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        try
+        {
+            // Windows 11：让系统把窗口角画成圆角（边缘平滑）。
+            var preference = DWMWCP_ROUND;
+            DwmSetWindowAttribute(Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int));
+        }
+        catch (Exception e2) when (e2 is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // 较旧的系统没有这个接口：下面用 Region 兜底。
+        }
+        ApplyRoundedShape();
+    }
+
+    protected override void OnSizeChanged(EventArgs e)
+    {
+        base.OnSizeChanged(e);
+        ApplyRoundedShape();
+    }
+
+    /// <summary>Windows 11 之前的系统不会自动画圆角，用窗口区域裁出圆角（边缘没有抗锯齿，但只有四个小角）。</summary>
+    private void ApplyRoundedShape()
+    {
+        if (!IsHandleCreated || WindowState == FormWindowState.Minimized) return;
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        {
+            Region = null;
+            return;
+        }
+
+        var radius = RadioSurface.WindowRadius * (Width / RadioSurface.BaseWidth);
+        using var path = RadioSurface.RoundedRect(new RectangleF(0, 0, Width, Height), radius);
+        var old = Region;
+        Region = new Region(path);
+        old?.Dispose();
+    }
+
+    /// <summary>在机身空白处按住鼠标即可拖动窗口（把这次按下交给系统当作点击标题栏）。</summary>
+    private void BeginWindowDrag()
+    {
+        ReleaseCapture();
+        SendMessage(Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    }
+
+    /// <summary>用户又启动了一个程序副本：把已有的窗口带到前台。</summary>
+    public void ActivateFromAnotherInstance()
+    {
+        if (IsDisposed) return;
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Show();
+        // Windows 限制后台程序抢前台；先短暂置顶再取消，可以可靠地把窗口提到最前。
+        TopMost = true;
+        TopMost = false;
+        Activate();
+    }
+
+    private static Icon? LoadIcon()
+    {
+        try
+        {
+            using var stream = typeof(MainForm).Assembly.GetManifestResourceStream("app.ico");
+            return stream is null ? null : new Icon(stream);
+        }
+        catch (Exception e) when (e is ArgumentException or IOException)
+        {
+            return null; // 图标缺失不影响使用
+        }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    private static extern nint SendMessage(nint hWnd, int msg, nint wParam, nint lParam);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref int value, int size);
 
     private void LayoutInput()
     {
         var s = _surface.Width / RadioSurface.BaseWidth;
-        _input.Bounds = _surface.ToClient(new RectangleF(16, 194, 328, 28));
+        _input.Bounds = _surface.ToClient(RadioSurface.InputRect);
 
         var old = _inputFont;
         _inputFont = new Font(RetroTheme.LcdFontFamily, 13f * s, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -192,14 +303,14 @@ public sealed class MainForm : Form
         if (!_hintShown) return;
         _hintShown = false;
         _input.Clear();
-        _input.ForeColor = RetroTheme.SecondaryText;
+        _input.ForeColor = RetroTheme.InputText;
     }
 
     private void ShowHintIfEmpty()
     {
         if (_input.Focused || _input.TextLength > 0) return;
         _hintShown = true;
-        _input.ForeColor = RetroTheme.Blend(RetroTheme.SecondaryText, RetroTheme.InputBackground, 0.45f);
+        _input.ForeColor = RetroTheme.InputHint;
         _input.Text = Hint;
     }
 

@@ -10,6 +10,16 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        // 同一时间只允许一个实例（它们共用同一个 state.json）。
+        // 如果已经有一个在运行，就让它把窗口提到前台，然后本实例直接退出。
+        using var instance = new SingleInstanceGuard(SingleInstanceGuard.DefaultName);
+        if (!instance.TryAcquire())
+        {
+            AllowSetForegroundWindow(-1); // 允许已在运行的实例抢到前台
+            instance.SignalExistingInstance();
+            return;
+        }
+
         ApplicationConfiguration.Initialize();
 
         // 异常不能把界面带崩：记录后继续运行（控制器自身会把错误显示在 LCD 上）。
@@ -23,6 +33,12 @@ internal static class Program
 
         using (var form = new MainForm(radio))
         {
+            instance.ActivationRequested += () =>
+            {
+                try { form.BeginInvoke(form.ActivateFromAnotherInstance); }
+                catch (Exception e) when (e is InvalidOperationException or ObjectDisposedException) { /* 窗口正在关闭 */ }
+            };
+
             form.Shown += async (_, _) =>
             {
                 try { await radio.RestoreAsync(); }
@@ -35,6 +51,9 @@ internal static class Program
         try { radio.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(8)); }
         catch (Exception e) { System.Diagnostics.Debug.WriteLine($"Shutdown failed: {e.Message}"); }
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int processId);
 
     private static IRadioController CreateController()
     {
