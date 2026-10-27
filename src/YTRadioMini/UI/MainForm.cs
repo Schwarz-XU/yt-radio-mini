@@ -9,7 +9,7 @@ namespace YTRadioMini.UI;
 /// </summary>
 public sealed class MainForm : Form
 {
-    private const string Hint = "Paste YouTube link, press Enter";
+    private const string Hint = "Paste link. Enter=add, Ctrl+Enter=newline";
 
     private readonly IRadioController _radio;
     private readonly RadioSurface _surface = new() { Dock = DockStyle.Fill };
@@ -45,8 +45,13 @@ public sealed class MainForm : Form
         Controls.Add(_surface);
         _input.BringToFront();
 
+        _surface.PreviousClicked += () => Fire(_radio.PreviousAsync);
         _surface.PlayPauseClicked += () => Fire(_radio.TogglePauseAsync);
         _surface.NextClicked += () => Fire(_radio.NextAsync);
+        _surface.PlayIndexRequested += i => Fire(() => _radio.PlayIndexAsync(i));
+        _surface.RemoveRequested += i => Fire(() => _radio.RemoveAsync(i));
+        _surface.MoveRequested += (from, to) => Fire(() => _radio.MoveAsync(from, to));
+        _surface.ClearRequested += () => Fire(_radio.ClearAsync);
         _surface.SizeChanged += (_, _) => LayoutInput();
         _input.KeyDown += OnInputKeyDown;
         _input.GotFocus += (_, _) => HideHint();
@@ -102,30 +107,41 @@ public sealed class MainForm : Form
 
     // ───────────── 键盘 ─────────────
 
-    protected override void OnKeyDown(KeyEventArgs e)
+    /// <summary>
+    /// 窗口级快捷键。放在 ProcessCmdKey 而不是 KeyDown 里，是因为方向键等会先被窗口的焦点导航消耗掉。
+    /// 输入框有焦点时，这些键都属于输入框。
+    /// </summary>
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        base.OnKeyDown(e);
-        if (e.Handled || _input.Focused) return; // 输入框有焦点时，Space / N 属于输入框
+        if (_input.Focused) return base.ProcessCmdKey(ref msg, keyData);
 
-        switch (e.KeyCode)
+        var key = keyData & Keys.KeyCode;
+        var modifiers = keyData & Keys.Modifiers;
+
+        if (_surface.HandleKey(key, modifiers)) return true;
+
+        switch (key)
         {
-            case Keys.Space when e.Modifiers == Keys.None:
-                e.SuppressKeyPress = e.Handled = true;
+            case Keys.Space when modifiers == Keys.None:
                 Fire(_radio.TogglePauseAsync);
-                break;
+                return true;
 
-            case Keys.N when e.Modifiers == Keys.None:
-                e.SuppressKeyPress = e.Handled = true;
+            case Keys.N when modifiers == Keys.None:
                 Fire(_radio.NextAsync);
-                break;
+                return true;
 
-            case Keys.V when e.Modifiers == Keys.Control:
+            case Keys.P when modifiers == Keys.None:
+                Fire(_radio.PreviousAsync);
+                return true;
+
+            case Keys.V when modifiers == Keys.Control:
                 // 没有焦点时 Ctrl+V 直接把剪贴板内容送进输入框。
-                e.SuppressKeyPress = e.Handled = true;
                 _input.Focus();
                 _input.Paste();
-                break;
+                return true;
         }
+
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
@@ -133,14 +149,14 @@ public sealed class MainForm : Form
         if (e.KeyCode == Keys.Enter)
         {
             e.SuppressKeyPress = e.Handled = true;
-            if (e.Control || e.Shift)
+            if (e.Control)
             {
-                // Ctrl+Enter / Shift+Enter：另起一行，用来逐条输入多个链接。
+                // Ctrl+Enter：另起一行，用来逐条输入多个链接。
                 _input.SelectedText = "\r\n";
             }
             else
             {
-                // Enter：提交输入框里的全部内容（一行或多行）。
+                // Enter（含 Shift+Enter）：提交输入框里的全部内容（一行或多行）。
                 Submit();
             }
         }

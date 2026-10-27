@@ -42,6 +42,9 @@ public sealed class RadioController : IRadioController
     private string? _ingestFailure;
     private CancellationTokenSource? _watchdog;
 
+    private long _snapshotVersion = -1;
+    private QueueItem[] _snapshot = Array.Empty<QueueItem>();
+
     private int _savePending;
     private volatile bool _disposed;
     private RadioViewState _view = RadioViewState.Empty;
@@ -154,9 +157,96 @@ public sealed class RadioController : IRadioController
     {
         if (!_queue.TryMoveNext()) return Task.CompletedTask;
         _consecutiveFailures = 0;
-        SelectCurrent(resetRetries: true);
+        SelectCurrent(resetRetries: true, userInitiated: true);
         return Task.CompletedTask;
     });
+
+    public Task PreviousAsync() => Post(() =>
+    {
+        if (!_queue.TryMovePrevious()) return Task.CompletedTask;
+        _consecutiveFailures = 0;
+        SelectCurrent(resetRetries: true, userInitiated: true);
+        return Task.CompletedTask;
+    });
+
+    public Task PlayIndexAsync(int index) => Post(() =>
+    {
+        if (!_queue.TrySetCurrent(index)) return Task.CompletedTask;
+        _consecutiveFailures = 0;
+        SelectCurrent(resetRetries: true, userInitiated: true);
+        return Task.CompletedTask;
+    });
+
+    public Task RemoveAsync(int index) => Post(() =>
+    {
+        var removingCurrent = index == _queue.CurrentIndex;
+        var wasActive = removingCurrent && HasActiveItem;
+        if (!_queue.RemoveAt(index)) return Task.CompletedTask;
+
+        if (_queue.Count == 0)
+        {
+            ResetToIdle(stopMpv: wasActive);
+        }
+        else if (removingCurrent)
+        {
+            // 原来的下一项顶到了当前位置；它是最后一项被删时，当前项退回新的最后一项。
+            var nextSlidIn = index < _queue.Count;
+            if (wasActive && nextSlidIn)
+            {
+                _consecutiveFailures = 0;
+                SelectCurrent(resetRetries: true);
+                return Task.CompletedTask;
+            }
+
+            DisarmWatchdog();
+            _gen++; // 取消尚未执行的自动跳过、重连与加载
+            _message = null;
+            _state = wasActive ? PlaybackState.Stopped : _state is PlaybackState.Error ? PlaybackState.Idle : _state;
+            if (wasActive) StopMpvQuietly();
+            Publish();
+            SaveSoon();
+            return Task.CompletedTask;
+        }
+
+        Publish();
+        SaveSoon();
+        return Task.CompletedTask;
+    });
+
+    public Task MoveAsync(int from, int to) => Post(() =>
+    {
+        if (_queue.Move(from, to))
+        {
+            Publish();
+            SaveSoon();
+        }
+        return Task.CompletedTask;
+    });
+
+    public Task ClearAsync() => Post(() =>
+    {
+        var wasActive = HasActiveItem;
+        _queue.Clear();
+        ResetToIdle(stopMpv: wasActive);
+        return Task.CompletedTask;
+    });
+
+    /// <summary>队列已空：回到初始待机状态。</summary>
+    private void ResetToIdle(bool stopMpv)
+    {
+        DisarmWatchdog();
+        _gen++;
+        _state = PlaybackState.Idle;
+        _message = null;
+        _consecutiveFailures = 0;
+        _liveRetries = 0;
+        if (stopMpv) StopMpvQuietly();
+        Publish();
+        SaveSoon();
+    }
+
+    private void StopMpvQuietly() =>
+        _ = _mpv.StopAsync(_cts.Token).ContinueWith(_ => { }, TaskScheduler.Default);
 
     // ───────────────────────────── 串行循环 ─────────────────────────────
 
@@ -201,8 +291,11 @@ public sealed class RadioController : IRadioController
 
     private bool HasActiveItem => _state is PlaybackState.Loading or PlaybackState.Playing or PlaybackState.Paused;
 
-    /// <summary>开始播放队列的当前项：递增序号、进入 Loading，并投递真正的加载。</summary>
-    private void SelectCurrent(bool resetRetries, bool keepMessage = false)
+    /// <summary>
+    /// 开始播放队列的当前项：递增序号、进入 Loading，并安排真正的加载。
+    /// userInitiated 为 true 时（用户手动切换）延迟一小段时间再加载，期间再次切换会让这次加载作废。
+    /// </summary>
+    private void SelectCurrent(bool resetRetries, bool keepMessage = false, bool userInitiated = false)
     {
         if (_queue.Current is null) return;
         if (resetRetries) _liveRetries = 0;
@@ -213,7 +306,10 @@ public sealed class RadioController : IRadioController
         Publish();
         SaveSoon();
 
-        _ = Post(() => LoadAsync(gen));
+        if (userInitiated && _opt.SelectDebounce > TimeSpan.Zero)
+            _ = DelayThenPost(_opt.SelectDebounce, () => LoadAsync(gen));
+        else
+            _ = Post(() => LoadAsync(gen));
     }
 
     private async Task LoadAsync(long gen)
@@ -257,7 +353,7 @@ public sealed class RadioController : IRadioController
             {
                 if (gen == _gen && _state == PlaybackState.Loading)
                 {
-                    _ = _mpv.StopAsync(_cts.Token).ContinueWith(_ => { }, TaskScheduler.Default);
+                    StopMpvQuietly();
                     FailCurrent(YtDlpErrors.ShortMessage(ResolveErrorKind.Timeout));
                 }
             }).ConfigureAwait(false);
@@ -458,23 +554,29 @@ public sealed class RadioController : IRadioController
             var mayStart = true;
             foreach (var link in links)
             {
-                ResolveResult result;
-                try
+                // 自动合辑（Mix）分两步：先立刻加入种子视频，让它马上开始播放；
+                // 再展开合辑，把其余条目追加在后面。展开失败时静默忽略，种子视频已经在播放。
+                if (link.Kind == LinkKind.Playlist && link.MixSeedVideoId is { } seed)
                 {
-                    result = await _resolver.ResolveAsync(link, _cts.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-                catch (Exception)
-                {
-                    result = ResolveResult.Fail(ResolveErrorKind.ParseFailed, YtDlpErrors.ShortMessage(ResolveErrorKind.ParseFailed));
+                    var seedLink = new ParsedLink(LinkKind.Video, LinkParser.VideoUrl(seed), seed, link.OriginalText);
+                    var seedResult = await ResolveSafeAsync(seedLink).ConfigureAwait(false);
+                    if (seedResult is null) return;
+                    mayStart = await ApplyAsync(seedLink, seedResult, mayStart, quiet: false, remember: true).ConfigureAwait(false);
+
+                    var mixResult = await ResolveSafeAsync(link).ConfigureAwait(false);
+                    if (mixResult is null) return;
+                    if (mixResult.Failure is null)
+                    {
+                        var rest = mixResult.Items.Where(i => i.Id != seed).ToList();
+                        mixResult = ResolveResult.Ok(rest);
+                    }
+                    mayStart = await ApplyAsync(link, mixResult, mayStart, quiet: true, remember: false).ConfigureAwait(false);
+                    continue;
                 }
 
-                var allowStart = mayStart;
-                if (result.Items.Count > 0) mayStart = false;
-                await PostSync(() => ApplyResolved(link, result, allowStart)).ConfigureAwait(false);
+                var result = await ResolveSafeAsync(link).ConfigureAwait(false);
+                if (result is null) return;
+                mayStart = await ApplyAsync(link, result, mayStart, quiet: false, remember: true).ConfigureAwait(false);
             }
         }
         finally
@@ -484,10 +586,35 @@ public sealed class RadioController : IRadioController
         }
     }
 
-    private void ApplyResolved(ParsedLink link, ResolveResult result, bool allowStart)
+    /// <summary>解析一个链接；取消时返回 null，其他异常转成失败结果。</summary>
+    private async Task<ResolveResult?> ResolveSafeAsync(ParsedLink link)
+    {
+        try
+        {
+            return await _resolver.ResolveAsync(link, _cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception)
+        {
+            return ResolveResult.Fail(ResolveErrorKind.ParseFailed, YtDlpErrors.ShortMessage(ResolveErrorKind.ParseFailed));
+        }
+    }
+
+    /// <summary>把解析结果交给串行循环处理，返回下一个链接是否仍可以触发自动播放。</summary>
+    private async Task<bool> ApplyAsync(ParsedLink link, ResolveResult result, bool mayStart, bool quiet, bool remember)
+    {
+        await PostSync(() => ApplyResolved(link, result, mayStart, quiet, remember)).ConfigureAwait(false);
+        return mayStart && result.Items.Count == 0;
+    }
+
+    private void ApplyResolved(ParsedLink link, ResolveResult result, bool allowStart, bool quiet, bool remember)
     {
         if (result.Failure is { } failure)
         {
+            if (quiet) return; // 合辑展开失败：种子视频已经在队列里，不打扰用户
             _ingestFailure = failure.Message;
             if (HasActiveItem)
             {
@@ -501,7 +628,7 @@ public sealed class RadioController : IRadioController
 
         var startPlaying = allowStart && !HasActiveItem;
         var first = _queue.Append(result.Items);
-        RememberLink(link.OriginalText);
+        if (remember) RememberLink(link.OriginalText);
 
         if (startPlaying && first >= 0)
         {
@@ -550,6 +677,12 @@ public sealed class RadioController : IRadioController
         var count = _queue.Count;
         var state = _state;
 
+        if (_snapshotVersion != _queue.Version)
+        {
+            _snapshot = _queue.Items.ToArray();
+            _snapshotVersion = _queue.Version;
+        }
+
         var view = new RadioViewState(
             state,
             current?.Title ?? "",
@@ -559,7 +692,9 @@ public sealed class RadioController : IRadioController
             _message,
             CanTogglePause: current is not null && state is PlaybackState.Playing or PlaybackState.Paused
                 or PlaybackState.Idle or PlaybackState.Stopped or PlaybackState.Error,
-            CanNext: _queue.HasNext);
+            CanNext: _queue.HasNext,
+            CanPrevious: _queue.HasPrevious,
+            Queue: _snapshot);
 
         if (view == _view) return;
         Volatile.Write(ref _view, view);

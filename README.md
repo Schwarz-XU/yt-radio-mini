@@ -1,63 +1,104 @@
 # YT Radio Mini
 
-Windows 上的极简 YouTube 音频播放器：粘贴 YouTube 链接，只播放音频。使用 C# / .NET 10 / WinForms，通过外部 mpv 播放，通过 yt-dlp 展开播放列表。
+A minimal Windows audio player for YouTube: paste a link and listen. It never shows video. Built with C# / .NET 10 / WinForms; playback is done by an external `mpv`, and playlists are expanded with `yt-dlp`.
 
-> 当前为开发版（阶段 1：模块实现完成，尚未在 Windows 上做真实 YouTube 验证，也没有性能实测数据）。发布包与中文用户说明在阶段 5 补全。
+> Development build. The modules are implemented and unit-tested, but the release package, the performance measurements and the full real-world YouTube verification are still to do.
 
-## 在 Windows 上运行（开发方式）
+## Running it on Windows (development)
 
-前提：已安装 .NET 10 SDK。
+Requires the .NET 10 SDK.
 
-1. 准备两个外部程序，放在以下任一位置：
-   - 编译输出目录（与 `YTRadioMini.exe` 同一文件夹，例如 `src\YTRadioMini\bin\Debug\net10.0-windows\`）；或
-   - 系统 `PATH` 中的某个文件夹。
+1. Put these two programs in one of the following places:
+   - the build output folder (next to `YTRadioMini.exe`, for example `src\YTRadioMini\bin\Debug\net10.0-windows\`), or
+   - any folder on the system `PATH`.
 
-   | 文件 | 来源 |
+   | File | Where to get it |
    |---|---|
-   | `yt-dlp.exe` | https://github.com/yt-dlp/yt-dlp/releases ，请用同一发布页的 `SHA2-256SUMS` 校验 |
-   | `mpv.exe` | https://mpv.io/installation/ 列出的 Windows 构建 |
+   | `yt-dlp.exe` | https://github.com/yt-dlp/yt-dlp/releases. Verify it with the `SHA2-256SUMS` file of the same release. |
+   | `mpv.exe` | A Windows build listed at https://mpv.io/installation/ |
 
-2. 运行：
+2. Start the app:
 
    ```powershell
    dotnet run --project src/YTRadioMini
    ```
 
-   只看界面、不启动 mpv 和 yt-dlp：
+   To look at the interface only, without starting mpv or yt-dlp:
 
    ```powershell
    dotnet run --project src/YTRadioMini -- --demo
    ```
 
-   `--demo` 下输入任意文本会得到三条模拟曲目；文本含 `bad` 会显示错误。
+   In `--demo` mode every submitted text adds three fake tracks; text containing `bad` shows an error.
 
-## 操作
+## Supported links
 
-| 操作 | 方式 |
+| Link | Result |
 |---|---|
-| 添加链接 | 在输入框粘贴或输入后按 Enter，提交框内的全部内容 |
-| 输入多个链接 | 一次粘贴多行；或输入一个链接后按 Ctrl+Enter（或 Shift+Enter）另起一行再输入下一个，最后按 Enter 一起提交 |
-| 播放 / 暂停 | 左侧圆形按钮；输入框没有焦点时按 Space |
-| 下一首 | 右侧圆形按钮；输入框没有焦点时按 N |
-| 输入框失去焦点 | 按 Esc，或点击机身 |
-| 没有焦点时粘贴 | 直接按 Ctrl+V，内容会进入输入框 |
+| `youtube.com/watch?v=ID`, `youtu.be/ID`, `youtube.com/live/ID`, `youtube.com/shorts/ID` | One video or live stream |
+| `youtube.com/playlist?list=ID` | The playlist, expanded into the queue |
+| `watch?v=ID&list=ID` (a video inside a playlist) | The playlist |
+| A video with an automatic Mix (`list=RD…`) | The video starts playing right away, then the Mix is expanded and appended after it. If the Mix cannot be expanded, only the video plays. |
 
-状态保存在 `%LOCALAPPDATA%\YTRadioMini\state.json`，下次启动恢复队列和位置，但不会自动开始播放。
+Lines that are not supported YouTube links are skipped and counted on the LCD. Only `youtube.com`, `www.`, `m.`, `music.` and `youtu.be` are accepted.
 
-## 开发与测试
+## Controls
+
+### Buttons and keys
+
+The shortcuts below work whenever the input box does **not** have keyboard focus. Press Esc or click the radio body to take the focus away from the input box.
+
+| Action | Mouse | Key |
+|---|---|---|
+| Previous item | Left round button | P |
+| Play / pause | Middle round button | Space |
+| Next item | Right round button | N |
+| Open the queue list | Click the LCD | L, or Up / Down / Page Up / Page Down |
+| Paste into the input box | | Ctrl+V (works even when the input box is not focused) |
+
+At the start or end of the queue the Previous or Next button is disabled; the queue never wraps around.
+
+### Adding links
+
+Type or paste a link into the input box and press **Enter**. This adds everything in the box to the end of the queue and does not interrupt what is playing. If the queue was empty or stopped, the first new item starts playing.
+
+To add several links at once, either paste several lines, or press **Ctrl+Enter** after each link to start a new line, then press **Enter** to add them all. The input box shows one line at a time; while it holds more than one line, a note above it shows how many links are waiting. Shift+Enter behaves like Enter.
+
+### Queue list
+
+Open the list by clicking the LCD or pressing L / Up / Down. The LCD then shows four queue rows, with `>` marking the item that is playing.
+
+| Action | Mouse | Key |
+|---|---|---|
+| Move the cursor | Click a row, or use the mouse wheel | Up / Down, Page Up / Page Down, Home / End |
+| Play the selected item (from the beginning) | Double-click a row | Enter |
+| Remove the selected item | | Delete |
+| Move the selected item up / down | | Ctrl+Up / Ctrl+Down |
+| Clear the whole queue and stop | | Shift+Delete (no confirmation) |
+| Close the list | Click the list header | Esc or L |
+
+Removing the item that is playing starts the item that follows it; if there is none, playback stops. Moving or removing other items does not interrupt playback.
+
+### The lamp
+
+Grey: idle, paused, stopped or error. Green: playing. Amber: loading.
+
+## Saved state
+
+The queue and the current position are saved to `%LOCALAPPDATA%\YTRadioMini\state.json` and restored at the next start. Playback does not start automatically. A damaged file is renamed to `state.json.corrupt-<timestamp>` (the three most recent are kept) and the app starts with an empty queue.
+
+## Development and tests
 
 ```bash
 dotnet build YTRadioMini.sln -c Release
 dotnet test tests/YTRadioMini.Tests -c Release
 ```
 
-测试项目链接主项目中不依赖 WinForms 的源码（`Models`、`Services`、`Application`、`Mocks`），因此可在 Linux 上运行。`MpvServiceIntegrationTests` 在 `PATH` 中找到 `mpv` 时会用真实 mpv 进程测试；找不到时这些测试直接返回，不会报告失败。
+The test project links the source folders that do not depend on WinForms (`Models`, `Services`, `Application`, `Mocks`), so the tests run on Linux as well. `MpvServiceIntegrationTests` use a real `mpv` process when `mpv` is found on `PATH`; when it is not found those tests return without running and are reported as passed.
 
-目录与职责：
-
-| 目录 | 内容 |
+| Folder | Content |
 |---|---|
-| `src/YTRadioMini/UI` | 窗口与自绘表面，只依赖 `IRadioController` |
-| `src/YTRadioMini/Application` | `RadioController`（串行工作循环）、`PlaybackQueue` |
-| `src/YTRadioMini/Services` | `MpvService`/`MpvIpcClient`、`YoutubeResolver`、`LinkParser`、`StorageService` |
-| `src/YTRadioMini/Mocks` | 供界面演示和测试使用的模拟服务 |
+| `src/YTRadioMini/UI` | Window and custom-drawn surface; depends only on `IRadioController` |
+| `src/YTRadioMini/Application` | `RadioController` (serial work loop), `PlaybackQueue`, `QueueBrowser` |
+| `src/YTRadioMini/Services` | `MpvService` / `MpvIpcClient`, `YoutubeResolver`, `LinkParser`, `StorageService` |
+| `src/YTRadioMini/Mocks` | Fake services for the demo mode and for tests |

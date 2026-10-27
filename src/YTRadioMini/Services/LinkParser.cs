@@ -87,7 +87,7 @@ public static class LinkParser
                 query.TryGetValue("v", out videoId);
                 query.TryGetValue("list", out listId);
             }
-            else if (segments.Length == 2 && segments[0] == "live")
+            else if (segments.Length == 2 && segments[0] is "live" or "shorts")
             {
                 videoId = segments[1];
                 query.TryGetValue("list", out listId);
@@ -97,10 +97,10 @@ public static class LinkParser
                 if (!query.TryGetValue("list", out listId)) { reason = "BAD LIST ID"; return false; }
                 if (!IsValidListId(listId)) { reason = "BAD LIST ID"; return false; }
 
-                // "RD" + 视频 ID 是以该视频为种子的自动合辑，不能按 /playlist 地址展开，改为播放种子视频。
+                // "RD" + 视频 ID 是以该视频为种子的自动合辑，要用带 v= 的 watch 地址展开。
                 if (MixSeedVideoId(listId) is { } seed)
                 {
-                    link = new ParsedLink(LinkKind.Video, VideoUrl(seed), seed, line);
+                    link = new ParsedLink(LinkKind.Playlist, MixUrl(seed, listId), listId, line, seed);
                     return true;
                 }
 
@@ -122,10 +122,11 @@ public static class LinkParser
         if (videoId is null || !IsValidVideoId(videoId)) { reason = "BAD VIDEO ID"; return false; }
 
         // 同时带有效 list 参数的链接优先按 Playlist 处理；list 无效则退回单个视频。
-        // 例外：自动合辑（Mix）无法用 /playlist 地址展开，只播放链接里的这个视频。
-        if (listId is not null && IsValidListId(listId) && !IsMixList(listId))
+        if (listId is not null && IsValidListId(listId))
         {
-            link = new ParsedLink(LinkKind.Playlist, PlaylistUrl(listId), listId, line);
+            link = IsMixList(listId)
+                ? new ParsedLink(LinkKind.Playlist, MixUrl(videoId, listId), listId, line, videoId)
+                : new ParsedLink(LinkKind.Playlist, PlaylistUrl(listId), listId, line);
             return true;
         }
 
@@ -153,6 +154,9 @@ public static class LinkParser
         }
         return null;
     }
+
+    public static string MixUrl(string seedVideoId, string listId) =>
+        $"https://www.youtube.com/watch?v={seedVideoId}&list={listId}";
 
     public static string VideoUrl(string id) => $"https://www.youtube.com/watch?v={id}";
     public static string PlaylistUrl(string id) => $"https://www.youtube.com/playlist?list={id}";

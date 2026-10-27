@@ -16,6 +16,9 @@ public class LinkParserTests
     [InlineData("https://youtu.be/dQw4w9WgXcQ?si=abc&t=3")]
     [InlineData("https://www.youtube.com/live/dQw4w9WgXcQ")]
     [InlineData("https://www.youtube.com/live/dQw4w9WgXcQ?feature=share")]
+    [InlineData("https://www.youtube.com/shorts/dQw4w9WgXcQ")]
+    [InlineData("https://youtube.com/shorts/dQw4w9WgXcQ?feature=share")]
+    [InlineData("https://m.youtube.com/shorts/dQw4w9WgXcQ")]
     [InlineData("HTTPS://WWW.YOUTUBE.COM/watch?v=dQw4w9WgXcQ")]
     [InlineData("http://www.youtube.com/watch?v=dQw4w9WgXcQ")]
     [InlineData("  https://youtu.be/dQw4w9WgXcQ  ")]
@@ -49,21 +52,23 @@ public class LinkParserTests
 
     [Theory]
     // 实际遇到的链接：视频同时属于自动合辑
-    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDeMe4vE1X60M&start_radio=1&t=14s", "eMe4vE1X60M")]
-    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDMMeMe4vE1X60M", "eMe4vE1X60M")]
-    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDGMEMCMFH2exzjBeE_zAHHJOdxg", "eMe4vE1X60M")]
-    [InlineData("https://youtu.be/eMe4vE1X60M?list=RDeMe4vE1X60M", "eMe4vE1X60M")]
-    [InlineData("https://www.youtube.com/live/eMe4vE1X60M?list=RDeMe4vE1X60M", "eMe4vE1X60M")]
-    // 只给合辑地址：用 ID 里的种子视频
-    [InlineData("https://www.youtube.com/playlist?list=RDeMe4vE1X60M", "eMe4vE1X60M")]
-    [InlineData("https://www.youtube.com/playlist?list=RDAMVMeMe4vE1X60M", "eMe4vE1X60M")]
-    public void MixLinks_PlayTheSeedVideo(string input, string expectedId)
+    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDeMe4vE1X60M&start_radio=1&t=14s", "RDeMe4vE1X60M", "eMe4vE1X60M")]
+    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDMMeMe4vE1X60M", "RDMMeMe4vE1X60M", "eMe4vE1X60M")]
+    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDGMEMCMFH2exzjBeE_zAHHJOdxg", "RDGMEMCMFH2exzjBeE_zAHHJOdxg", "eMe4vE1X60M")]
+    [InlineData("https://youtu.be/eMe4vE1X60M?list=RDeMe4vE1X60M", "RDeMe4vE1X60M", "eMe4vE1X60M")]
+    [InlineData("https://www.youtube.com/live/eMe4vE1X60M?list=RDeMe4vE1X60M", "RDeMe4vE1X60M", "eMe4vE1X60M")]
+    // 只给合辑地址：用列表 ID 里的种子视频
+    [InlineData("https://www.youtube.com/playlist?list=RDeMe4vE1X60M", "RDeMe4vE1X60M", "eMe4vE1X60M")]
+    [InlineData("https://www.youtube.com/playlist?list=RDAMVMeMe4vE1X60M", "RDAMVMeMe4vE1X60M", "eMe4vE1X60M")]
+    public void MixLinks_AreExpandablePlaylists_WithTheirSeedVideo(string input, string listId, string seed)
     {
         var link = Assert.Single(LinkParser.Parse(input).Valid);
 
-        Assert.Equal(LinkKind.Video, link.Kind);
-        Assert.Equal(expectedId, link.Id);
-        Assert.Equal($"https://www.youtube.com/watch?v={expectedId}", link.Url);
+        Assert.Equal(LinkKind.Playlist, link.Kind);
+        Assert.Equal(listId, link.Id);
+        Assert.Equal(seed, link.MixSeedVideoId);
+        // 合辑只能用带 v= 的 watch 地址展开
+        Assert.Equal($"https://www.youtube.com/watch?v={seed}&list={listId}", link.Url);
     }
 
     [Theory]
@@ -76,10 +81,26 @@ public class LinkParserTests
     }
 
     [Fact]
-    public void MixWithoutDerivableSeed_OnPlaylistUrl_StaysAPlaylist()
+    public void MixWithoutDerivableSeed_OnPlaylistUrl_StaysAPlainPlaylist()
     {
         var link = Assert.Single(LinkParser.Parse("https://www.youtube.com/playlist?list=RDGMEMCMFH2exzjBeE_zAHHJOdxg").Valid);
         Assert.Equal(LinkKind.Playlist, link.Kind);
+        Assert.Null(link.MixSeedVideoId);
+    }
+
+    [Fact]
+    public void Shorts_AreCanonicalizedToTheWatchUrl()
+    {
+        var link = Assert.Single(LinkParser.Parse("https://www.youtube.com/shorts/dIxySpfJf-8").Valid);
+        Assert.Equal(LinkKind.Video, link.Kind);
+        Assert.Equal("https://www.youtube.com/watch?v=dIxySpfJf-8", link.Url);
+    }
+
+    [Fact]
+    public void PlainPlaylists_HaveNoMixSeed()
+    {
+        var link = Assert.Single(LinkParser.Parse("https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf").Valid);
+        Assert.Null(link.MixSeedVideoId);
     }
 
     [Fact]
@@ -112,7 +133,9 @@ public class LinkParserTests
     [InlineData("https://www.youtube.com/")]
     [InlineData("https://www.youtube.com/results?search_query=x")]
     [InlineData("https://www.youtube.com/@channel")]
-    [InlineData("https://www.youtube.com/shorts/dQw4w9WgXcQ")]
+    [InlineData("https://www.youtube.com/shorts")]
+    [InlineData("https://www.youtube.com/shorts/dQw4w9WgXcQ/extra")]
+    [InlineData("https://www.youtube.com/shorts/short")]
     [InlineData("https://www.youtube.com/watch/dQw4w9WgXcQ")]
     [InlineData("https://youtu.be/")]
     [InlineData("https://youtu.be/dQw4w9WgXcQ/extra")]

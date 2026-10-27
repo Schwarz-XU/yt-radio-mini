@@ -18,4 +18,10 @@ public sealed class RadioControllerOptions
     public TimeSpan SaveDebounce { get; init; } = TimeSpan.FromMilliseconds(500);
 
     public int MaxSavedLinks { get; init; } = 200;
+
+    /// <summary>
+    /// 用户手动切换条目（下一首、上一首、从队列选择）后，等待多久再真正发出加载命令。
+    /// 连续快速切换时只加载最后一项，避免为被跳过的条目白白启动 yt-dlp。
+    /// </summary>
+    public TimeSpan SelectDebounce { get; init; } = TimeSpan.FromMilliseconds(120);
 }

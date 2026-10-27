@@ -5,16 +5,17 @@ namespace YTRadioMini.Mocks;
 
 /// <summary>
 /// 供 UI 开发和演示使用的模拟控制器：不启动任何外部进程。
-/// 提交任意文本后生成 3 条队列；文本含 "bad" 时显示错误。
+/// 每次提交都会追加 3 条模拟曲目；文本含 "bad" 时显示错误。
+/// 支持上一首/下一首、从队列中选择、删除、移动和清空。
 /// </summary>
 public sealed class FakeRadioController : IRadioController
 {
     private readonly TimeSpan _delay;
     private readonly object _gate = new();
-    private List<string> _titles = new();
-    private int _index;
+    private readonly PlaybackQueue _queue = new();
     private PlaybackState _state = PlaybackState.Idle;
     private string? _message;
+    private int _serial;
     private RadioViewState _view = RadioViewState.Empty;
 
     public FakeRadioController(TimeSpan? simulatedDelay = null) =>
@@ -36,20 +37,22 @@ public sealed class FakeRadioController : IRadioController
         }
 
         bool wasEmpty;
-        lock (_gate) wasEmpty = _titles.Count == 0;
+        lock (_gate) wasEmpty = _queue.Count == 0;
 
         Publish(PlaybackState.Resolving);
         await Task.Delay(_delay).ConfigureAwait(false);
 
         lock (_gate)
         {
-            var start = _titles.Count;
-            _titles = _titles.Concat(Enumerable.Range(1, 3).Select(i => $"Fake track {start + i}")).ToList();
-            if (wasEmpty) _index = 0;
+            var items = Enumerable.Range(1, 3).Select(_ =>
+            {
+                var n = ++_serial;
+                return new QueueItem($"fake{n:D7}", $"https://www.youtube.com/watch?v=fake{n:D7}", $"Fake track {n}", false);
+            });
+            _queue.Append(items);
         }
 
-        if (wasEmpty) Publish(PlaybackState.Playing);
-        else Publish(null);
+        Publish(wasEmpty ? PlaybackState.Playing : null);
     }
 
     public Task TogglePauseAsync()
@@ -63,13 +66,53 @@ public sealed class FakeRadioController : IRadioController
 
     public Task NextAsync()
     {
-        bool atEnd;
-        lock (_gate)
+        bool moved;
+        lock (_gate) moved = _queue.TryMoveNext();
+        Publish(moved ? PlaybackState.Playing : PlaybackState.Stopped);
+        return Task.CompletedTask;
+    }
+
+    public Task PreviousAsync()
+    {
+        bool moved;
+        lock (_gate) moved = _queue.TryMovePrevious();
+        if (moved) Publish(PlaybackState.Playing);
+        return Task.CompletedTask;
+    }
+
+    public Task PlayIndexAsync(int index)
+    {
+        bool ok;
+        lock (_gate) ok = _queue.TrySetCurrent(index);
+        if (ok) Publish(PlaybackState.Playing);
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveAsync(int index)
+    {
+        bool ok;
+        lock (_gate) ok = _queue.RemoveAt(index);
+        if (ok)
         {
-            atEnd = _index >= _titles.Count - 1;
-            if (!atEnd) _index++;
+            bool empty;
+            lock (_gate) empty = _queue.Count == 0;
+            Publish(empty ? PlaybackState.Idle : null);
         }
-        Publish(atEnd ? PlaybackState.Stopped : PlaybackState.Playing);
+        return Task.CompletedTask;
+    }
+
+    public Task MoveAsync(int from, int to)
+    {
+        bool ok;
+        lock (_gate) ok = _queue.Move(from, to);
+        if (ok) Publish(null);
+        return Task.CompletedTask;
+    }
+
+    public Task ClearAsync()
+    {
+        lock (_gate) _queue.Clear();
+        Publish(PlaybackState.Idle);
         return Task.CompletedTask;
     }
 
@@ -83,18 +126,18 @@ public sealed class FakeRadioController : IRadioController
         {
             if (newState is { } s) _state = s;
             _message = message;
-            var count = _titles.Count;
-            var title = count > 0 ? _titles[_index] : "";
             var active = _state is PlaybackState.Playing or PlaybackState.Paused;
             view = new RadioViewState(
                 _state,
-                title,
-                count == 0 ? 0 : _index + 1,
-                count,
+                _queue.Current?.Title ?? "",
+                _queue.CurrentIndex >= 0 ? _queue.CurrentIndex + 1 : 0,
+                _queue.Count,
                 IsLive: false,
                 _message,
                 CanTogglePause: active,
-                CanNext: count > 0 && _index < count - 1);
+                CanNext: _queue.HasNext,
+                CanPrevious: _queue.HasPrevious,
+                Queue: _queue.Items.ToArray());
             _view = view;
         }
         StateChanged?.Invoke(view);

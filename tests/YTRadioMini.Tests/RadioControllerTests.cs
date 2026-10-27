@@ -62,6 +62,7 @@ public sealed class RadioControllerTests : IAsyncLifetime
             ErrorSkipDelay = TimeSpan.FromMilliseconds(40),
             LiveRetryDelays = new[] { TimeSpan.FromMilliseconds(40), TimeSpan.FromMilliseconds(40) },
             SaveDebounce = TimeSpan.FromMilliseconds(20),
+            SelectDebounce = TimeSpan.FromMilliseconds(40),
             LoadTimeout = TimeSpan.FromSeconds(30),
         });
         radio.StateChanged += v => { lock (_views) _views.Add(v); };
@@ -750,6 +751,346 @@ public sealed class RadioControllerTests : IAsyncLifetime
         await Task.Delay(50);
 
         lock (_views) Assert.Equal(before, _views.Count);
+    }
+
+    // ───────── 上一首与队列编辑 ─────────
+
+    private static string[] Ids(RadioViewState v) => v.Queue!.Select(i => i.Id).ToArray();
+
+    [Fact]
+    public async Task Previous_GoesBack_AndIsDisabledAtTheStart()
+    {
+        await StartPlaying(A, B, C);
+        Assert.False(_radio.State.CanPrevious);
+
+        await _radio.NextAsync();
+        await WaitLoads(2);
+        _mpv.RaiseFileLoaded();
+        await WaitState(PlaybackState.Playing);
+        Assert.True(_radio.State.CanPrevious);
+
+        await _radio.PreviousAsync();
+        await WaitLoads(3);
+        Assert.Equal(Url(A), _mpv.Loads[2]);
+        Assert.False(_radio.State.CanPrevious);
+
+        await _radio.PreviousAsync(); // 队首：无效果
+        await Task.Delay(80);
+        Assert.Equal(3, _mpv.Loads.Count);
+    }
+
+    [Fact]
+    public async Task Previous_AfterTheQueueEnded_PlaysThePreviousItem()
+    {
+        await StartPlaying(A, B);
+        _mpv.RaiseEof(); await WaitLoads(2); _mpv.RaiseFileLoaded(); await WaitState(PlaybackState.Playing);
+        _mpv.RaiseEof(); await WaitState(PlaybackState.Stopped);
+
+        await _radio.PreviousAsync();
+
+        await WaitLoads(3);
+        Assert.Equal(Url(A), _mpv.Loads[2]);
+    }
+
+    [Fact]
+    public async Task PlayIndex_JumpsToTheChosenItem_EvenBackwards()
+    {
+        await StartPlaying(A, B, C, D);
+        await _radio.PlayIndexAsync(3);
+        await WaitLoads(2);
+        _mpv.RaiseFileLoaded();
+        await WaitState(PlaybackState.Playing);
+        Assert.Equal(4, _radio.State.Position);
+
+        await _radio.PlayIndexAsync(1);
+
+        await WaitLoads(3);
+        Assert.Equal(new[] { Url(A), Url(D), Url(B) }, _mpv.Loads);
+        Assert.Equal(2, _radio.State.Position);
+    }
+
+    [Fact]
+    public async Task PlayIndex_OutOfRange_IsIgnored()
+    {
+        await StartPlaying(A, B);
+        await _radio.PlayIndexAsync(5);
+        await _radio.PlayIndexAsync(-1);
+        await Task.Delay(80);
+        Assert.Single(_mpv.Loads);
+        Assert.Equal(1, _radio.State.Position);
+    }
+
+    [Fact]
+    public async Task PlayIndex_OfThePlayingItem_RestartsIt()
+    {
+        await StartPlaying(A, B);
+        await _radio.PlayIndexAsync(0);
+        await WaitLoads(2);
+        Assert.Equal(new[] { Url(A), Url(A) }, _mpv.Loads);
+    }
+
+    [Fact]
+    public async Task Remove_ANonCurrentItem_DoesNotDisturbPlayback()
+    {
+        await StartPlaying(A, B, C);
+        await _radio.NextAsync(); await WaitLoads(2); _mpv.RaiseFileLoaded(); await WaitState(PlaybackState.Playing);
+
+        await _radio.RemoveAsync(0); // 当前项之前
+        await TestSupport.WaitUntil(() => _radio.State.Count == 2);
+        Assert.Equal(new[] { B, C }, Ids(_radio.State));
+        Assert.Equal(1, _radio.State.Position);
+        Assert.Equal(PlaybackState.Playing, _radio.State.State);
+
+        await _radio.RemoveAsync(1); // 当前项之后
+        await TestSupport.WaitUntil(() => _radio.State.Count == 1);
+        Assert.Equal(new[] { B }, Ids(_radio.State));
+        Assert.False(_radio.State.CanNext);
+        Assert.Equal(2, _mpv.Loads.Count);
+        Assert.DoesNotContain("stop", _mpv.Commands);
+    }
+
+    [Fact]
+    public async Task Remove_ThePlayingItem_StartsTheNextOne()
+    {
+        await StartPlaying(A, B, C);
+
+        await _radio.RemoveAsync(0);
+
+        await WaitLoads(2);
+        Assert.Equal(Url(B), _mpv.Loads[1]);
+        Assert.Equal(new[] { B, C }, Ids(_radio.State));
+        Assert.Equal(PlaybackState.Loading, _radio.State.State);
+        Assert.Equal(1, _radio.State.Position);
+    }
+
+    [Fact]
+    public async Task Remove_ThePlayingLastItem_StopsPlayback()
+    {
+        await StartPlaying(A, B);
+        await _radio.NextAsync(); await WaitLoads(2); _mpv.RaiseFileLoaded(); await WaitState(PlaybackState.Playing);
+
+        await _radio.RemoveAsync(1);
+
+        await WaitState(PlaybackState.Stopped);
+        Assert.Contains("stop", _mpv.Commands);
+        Assert.Equal(new[] { A }, Ids(_radio.State));
+        Assert.Equal(1, _radio.State.Position);
+        Assert.Equal(2, _mpv.Loads.Count); // 没有自动播放"退回"的那一项
+    }
+
+    [Fact]
+    public async Task Remove_TheOnlyItem_ReturnsToIdle()
+    {
+        await StartPlaying(A);
+
+        await _radio.RemoveAsync(0);
+
+        await WaitState(PlaybackState.Idle);
+        Assert.Equal(0, _radio.State.Count);
+        Assert.Contains("stop", _mpv.Commands);
+        Assert.False(_radio.State.CanTogglePause);
+    }
+
+    [Fact]
+    public async Task Remove_WhileLoadingTheItem_CancelsItsPendingLoad()
+    {
+        await StartPlaying(A, B, C);
+        await _radio.NextAsync();            // 进入 B 的加载
+        await _radio.RemoveAsync(1);         // 在 B 的加载命令发出前就删除 B
+        await Task.Delay(100);
+
+        Assert.DoesNotContain(Url(B), _mpv.Loads.Skip(1)); // 要么没发过 B 的加载，要么随后被 C 取代
+        Assert.Equal(new[] { A, C }, Ids(_radio.State));
+    }
+
+    [Fact]
+    public async Task Remove_AFailedItem_DropsItWithoutAutoSkipping()
+    {
+        await _radio.SubmitAsync(Link(A) + "\n" + Link(B));
+        await WaitLoads(1);
+        _mpv.RaiseError("x");
+        await WaitState(PlaybackState.Error);
+
+        await _radio.RemoveAsync(0);
+        await Task.Delay(120);
+
+        Assert.Single(_mpv.Loads);                       // 自动跳过被取消
+        Assert.Equal(new[] { B }, Ids(_radio.State));
+        Assert.Equal(PlaybackState.Idle, _radio.State.State);
+        Assert.Null(_radio.State.Message);
+    }
+
+    [Fact]
+    public async Task Remove_OutOfRange_IsIgnored()
+    {
+        await StartPlaying(A, B);
+        await _radio.RemoveAsync(7);
+        await _radio.RemoveAsync(-1);
+        await Task.Delay(50);
+        Assert.Equal(2, _radio.State.Count);
+    }
+
+    [Fact]
+    public async Task Move_ReordersTheQueue_WithoutInterruptingPlayback()
+    {
+        await StartPlaying(A, B, C, D);
+
+        await _radio.MoveAsync(3, 0);
+
+        await TestSupport.WaitUntil(() => Ids(_radio.State).SequenceEqual(new[] { D, A, B, C }));
+        Assert.Equal(2, _radio.State.Position);  // 正在播放的 A 现在排第二
+        Assert.Equal(PlaybackState.Playing, _radio.State.State);
+        Assert.Single(_mpv.Loads);
+
+        _mpv.RaiseEof();                         // 播完后接着播放原来在 A 后面的 B
+        await WaitLoads(2);
+        Assert.Equal(Url(B), _mpv.Loads[1]);
+    }
+
+    [Fact]
+    public async Task Clear_StopsAndEmptiesTheQueue()
+    {
+        await StartPlaying(A, B);
+
+        await _radio.ClearAsync();
+
+        await WaitState(PlaybackState.Idle);
+        Assert.Equal(0, _radio.State.Count);
+        Assert.Empty(_radio.State.Queue!);
+        Assert.Contains("stop", _mpv.Commands);
+        await TestSupport.WaitUntil(() => _storage.Stored.Queue.Count == 0, 5, "cleared queue saved");
+    }
+
+    [Fact]
+    public async Task Clear_ThenSubmit_StartsFresh()
+    {
+        await StartPlaying(A);
+        await _radio.ClearAsync();
+        await WaitState(PlaybackState.Idle);
+
+        await _radio.SubmitAsync(Link(B));
+
+        await WaitLoads(2);
+        Assert.Equal(Url(B), _mpv.Loads[1]);
+        Assert.Equal((1, 1), (_radio.State.Position, _radio.State.Count));
+    }
+
+    [Fact]
+    public async Task ViewState_ExposesAQueueSnapshot_ThatOnlyChangesWithTheQueue()
+    {
+        await StartPlaying(A, B);
+        var first = _radio.State.Queue;
+        Assert.Equal(new[] { A, B }, first!.Select(i => i.Id));
+
+        await _radio.TogglePauseAsync();         // 状态变化不应换新快照
+        await WaitState(PlaybackState.Paused);
+        Assert.Same(first, _radio.State.Queue);
+
+        _mpv.RaiseMediaTitle("Real"); // 标题补全属于队列内容变化
+        await TestSupport.WaitUntil(() => !ReferenceEquals(first, _radio.State.Queue));
+        Assert.Equal("Real", _radio.State.Queue![0].Title);
+    }
+
+    [Fact]
+    public async Task EditedQueue_IsPersisted()
+    {
+        await StartPlaying(A, B, C);
+        await _radio.RemoveAsync(2);
+        await _radio.MoveAsync(1, 0);
+
+        await TestSupport.WaitUntil(() => _storage.Stored.Queue.Select(i => i.Id).SequenceEqual(new[] { B, A }), 5, "edited queue saved");
+        Assert.Equal(1, _storage.Stored.CurrentIndex);
+    }
+
+    // ───────── 自动合辑（Mix） ─────────
+
+    private static string MixLink(string seed) =>
+        $"https://www.youtube.com/watch?v={seed}&list=RD{seed}&start_radio=1";
+
+    [Fact]
+    public async Task Mix_PlaysTheSeedImmediately_ThenAppendsTheRestWithoutDuplicates()
+    {
+        var gate = new TaskCompletionSource();
+        _resolver.Handler = async (link, ct) =>
+        {
+            if (link.Kind == LinkKind.Video)
+                return ResolveResult.Ok(new[] { new QueueItem(link.Id, link.Url, "", false) });
+
+            await gate.Task; // 合辑展开比较慢
+            return ResolveResult.Ok(new[] { Item(A), Item(B), Item(C) }); // 第一项就是种子
+        };
+
+        await _radio.SubmitAsync(MixLink(A));
+
+        await WaitLoads(1);                       // 展开完成前，种子视频已经开始加载
+        Assert.Equal(Url(A), _mpv.Loads[0]);
+        Assert.Equal(1, _radio.State.Count);
+
+        gate.SetResult();
+        await TestSupport.WaitUntil(() => _radio.State.Count == 3);
+        Assert.Equal(new[] { A, B, C }, Ids(_radio.State));
+        Assert.Single(_mpv.Loads);                // 追加不打断当前播放
+    }
+
+    [Fact]
+    public async Task Mix_ResolvesTheWatchUrlWithList()
+    {
+        var seen = new List<ParsedLink>();
+        _resolver.Handler = (link, _) =>
+        {
+            lock (seen) seen.Add(link);
+            return Task.FromResult(ResolveResult.Ok(new[] { Item(link.Id) }));
+        };
+
+        await _radio.SubmitAsync(MixLink(A));
+        await TestSupport.WaitUntil(() => { lock (seen) return seen.Count == 2; });
+
+        lock (seen)
+        {
+            Assert.Equal(LinkKind.Video, seen[0].Kind);
+            Assert.Equal(LinkKind.Playlist, seen[1].Kind);
+            Assert.Equal($"https://www.youtube.com/watch?v={A}&list=RD{A}", seen[1].Url);
+        }
+    }
+
+    [Fact]
+    public async Task Mix_ExpansionFailure_IsSilent_AndTheSeedKeepsPlaying()
+    {
+        _resolver.Handler = (link, _) => Task.FromResult(link.Kind == LinkKind.Video
+            ? ResolveResult.Ok(new[] { new QueueItem(link.Id, link.Url, "", false) })
+            : ResolveResult.Fail(ResolveErrorKind.ParseFailed, "CAN'T PLAY"));
+
+        await _radio.SubmitAsync(MixLink(A));
+        await WaitLoads(1);
+        _mpv.RaiseFileLoaded();
+        await WaitState(PlaybackState.Playing);
+        await Task.Delay(100);
+
+        Assert.Null(_radio.State.Message);
+        Assert.Equal(1, _radio.State.Count);
+    }
+
+    [Fact]
+    public async Task Mix_WithAnUnavailableSeed_StillPlaysTheExpandedItems()
+    {
+        _resolver.Handler = (link, _) => Task.FromResult(link.Kind == LinkKind.Video
+            ? ResolveResult.Fail(ResolveErrorKind.Unavailable, "VIDEO UNAVAILABLE")
+            : ResolveResult.Ok(new[] { Item(B), Item(C) }));
+
+        await _radio.SubmitAsync(MixLink(A));
+
+        await WaitLoads(1);
+        Assert.Equal(Url(B), _mpv.Loads[0]);
+    }
+
+    [Fact]
+    public async Task Mix_IsRememberedOnce()
+    {
+        await _radio.SubmitAsync(MixLink(A));
+        await TestSupport.WaitUntil(() => _storage.Stored.Queue.Count >= 1);
+        await Task.Delay(100);
+
+        Assert.Single(_storage.Stored.SavedLinks);
     }
 
     // ───────── 压力 ─────────

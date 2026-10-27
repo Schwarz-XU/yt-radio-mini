@@ -1,11 +1,14 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using YTRadioMini.AppLogic;
 using YTRadioMini.Models;
 
 namespace YTRadioMini.UI;
 
 /// <summary>
-/// 整台"收音机"的自绘表面：外壳、LCD、扬声器格栅、两个圆形按钮和状态灯。
+/// 整台"收音机"的自绘表面：外壳、LCD、扬声器格栅、三个圆形按钮和状态灯。
+/// LCD 有两种显示：正常的播放信息，和队列列表（用来选择、删除、移动条目）。
 /// 所有坐标以 360 × 240 为基准，绘制时按控件宽度缩放，因此在任何 DPI 下版面一致。
 /// 只在状态变化时重绘，没有定时器和动画。
 /// </summary>
@@ -14,40 +17,56 @@ public sealed class RadioSurface : Control
     public const float BaseWidth = 360f;
     public const float BaseHeight = 240f;
 
+    private const int ListRows = 4;
+    private const float ListHeaderHeight = 24f;
+    private const float ListRowHeight = 15f;
+
     private static readonly RectangleF LcdRect = new(16, 14, 328, 92);
-    private static readonly RectangleF GrilleRect = new(18, 122, 150, 56);
-    private static readonly RectangleF PlayRect = new(196, 122, 52, 52);
-    private static readonly RectangleF NextRect = new(262, 122, 52, 52);
+    private static readonly RectangleF GrilleRect = new(18, 122, 104, 56);
+    private static readonly RectangleF PrevRect = new(136, 122, 52, 52);
+    private static readonly RectangleF PlayRect = new(198, 122, 52, 52);
+    private static readonly RectangleF NextRect = new(260, 122, 52, 52);
     private static readonly RectangleF LampRect = new(326, 142, 12, 12);
 
     private readonly Font _positionFont = MakeFont(11, FontStyle.Regular);
     private readonly Font _tagFont = MakeFont(11, FontStyle.Bold);
     private readonly Font _titleFont = MakeFont(14, FontStyle.Bold);
     private readonly Font _messageFont = MakeFont(11, FontStyle.Regular);
+    private readonly Font _rowFont = MakeFont(12, FontStyle.Regular);
     private readonly StringFormat _titleFormat = new(StringFormatFlags.LineLimit) { Trimming = StringTrimming.EllipsisWord };
     private readonly StringFormat _lineFormat = new(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter };
     private readonly StringFormat _rightFormat = new(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Far, Trimming = StringTrimming.EllipsisCharacter };
 
+    private readonly QueueBrowser _browser = new(ListRows);
     private RadioViewState _view = RadioViewState.Empty;
     private Button? _pressed;
     private string _inputNote = "";
+    private bool _listMode;
 
-    private enum Button { Play, Next }
+    private enum Button { Previous, Play, Next }
 
     public RadioSurface()
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        SetStyle(ControlStyles.Selectable, false); // 不抢键盘焦点，Space / N 由窗体处理
+        SetStyle(ControlStyles.Selectable, false); // 不抢键盘焦点，快捷键由窗体处理
         TabStop = false;
         AccessibleName = "YT Radio Mini";
         AccessibleRole = AccessibleRole.Client;
     }
 
+    public event Action? PreviousClicked;
     public event Action? PlayPauseClicked;
     public event Action? NextClicked;
 
-    [System.ComponentModel.Browsable(false)]
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    /// <summary>在队列列表中选择了某一项播放。</summary>
+    public event Action<int>? PlayIndexRequested;
+
+    public event Action<int>? RemoveRequested;
+    public event Action<int, int>? MoveRequested;
+    public event Action? ClearRequested;
+
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public RadioViewState View
     {
         get => _view;
@@ -55,14 +74,19 @@ public sealed class RadioSurface : Control
         {
             if (_view == value) return;
             _view = value;
+            if (_listMode)
+            {
+                _browser.SetCount(value.Queue?.Count ?? 0);
+                if (_browser.Count == 0) _listMode = false; // 队列被清空：回到播放显示
+            }
             AccessibleDescription = $"{value.State}: {value.Title} {value.Position}/{value.Count} {value.Message}".Trim();
             Invalidate();
         }
     }
 
-    /// <summary>显示在输入框上方的一行小字，例如"3 条链接待提交"；空字符串表示不显示。</summary>
-    [System.ComponentModel.Browsable(false)]
-    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    /// <summary>显示在输入框上方的一行小字，例如"3 LINKS READY"；空字符串表示不显示。</summary>
+    [Browsable(false)]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public string InputNote
     {
         get => _inputNote;
@@ -73,6 +97,9 @@ public sealed class RadioSurface : Control
             Invalidate();
         }
     }
+
+    [Browsable(false)]
+    public bool ListMode => _listMode;
 
     private float ScaleFactor => Width / BaseWidth;
 
@@ -85,6 +112,96 @@ public sealed class RadioSurface : Control
 
     private static Font MakeFont(float pixels, FontStyle style) =>
         new(RetroTheme.LcdFontFamily, pixels, style, GraphicsUnit.Pixel);
+
+    // ───────────── 队列列表 ─────────────
+
+    private int QueueCount => _view.Queue?.Count ?? 0;
+
+    public void OpenList()
+    {
+        if (QueueCount == 0) return;
+        _browser.Open(Math.Max(0, _view.Position - 1), QueueCount);
+        _listMode = true;
+        Invalidate();
+    }
+
+    public void CloseList()
+    {
+        if (!_listMode) return;
+        _listMode = false;
+        Invalidate();
+    }
+
+    /// <summary>
+    /// 处理与队列列表有关的按键，返回是否已处理。
+    /// 未打开列表时：L、↑、↓、PageUp、PageDown 打开列表。
+    /// 打开后：↑/↓/PageUp/PageDown/Home/End 移动光标，Enter 播放光标项，Delete 删除光标项，
+    /// Shift+Delete 清空队列，Ctrl+↑/Ctrl+↓ 上移/下移光标项，Esc 或 L 关闭列表。
+    /// </summary>
+    public bool HandleKey(Keys key, Keys modifiers)
+    {
+        if (!_listMode)
+        {
+            if (modifiers != Keys.None) return false;
+            if (key is Keys.L or Keys.Up or Keys.Down or Keys.PageUp or Keys.PageDown)
+            {
+                OpenList();
+                return true;
+            }
+            return false;
+        }
+
+        var ctrl = modifiers == Keys.Control;
+        var shift = modifiers == Keys.Shift;
+        var none = modifiers == Keys.None;
+
+        switch (key)
+        {
+            case Keys.Up when none: _browser.MoveBy(-1); break;
+            case Keys.Down when none: _browser.MoveBy(1); break;
+            case Keys.PageUp when none: _browser.MoveBy(-ListRows); break;
+            case Keys.PageDown when none: _browser.MoveBy(ListRows); break;
+            case Keys.Home when none: _browser.Home(); break;
+            case Keys.End when none: _browser.End(); break;
+
+            case Keys.Up when ctrl: MoveCursorItem(-1); break;
+            case Keys.Down when ctrl: MoveCursorItem(1); break;
+
+            case Keys.Enter when none:
+                if (QueueCount > 0) PlayIndexRequested?.Invoke(_browser.Cursor);
+                CloseList();
+                break;
+
+            case Keys.Delete when none:
+                if (QueueCount > 0) RemoveRequested?.Invoke(_browser.Cursor);
+                break;
+
+            case Keys.Delete when shift:
+                ClearRequested?.Invoke();
+                CloseList();
+                break;
+
+            case Keys.Escape when none:
+            case Keys.L when none:
+                CloseList();
+                break;
+
+            default:
+                return false;
+        }
+
+        Invalidate();
+        return true;
+    }
+
+    private void MoveCursorItem(int delta)
+    {
+        var from = _browser.Cursor;
+        var to = from + delta;
+        if (to < 0 || to >= QueueCount) return;
+        MoveRequested?.Invoke(from, to);
+        _browser.SetCursor(to); // 光标跟着条目走，不等控制器回传
+    }
 
     // ───────────── 绘制 ─────────────
 
@@ -99,8 +216,10 @@ public sealed class RadioSurface : Control
             g.ScaleTransform(ScaleFactor, ScaleFactor);
 
             DrawShell(g);
-            DrawLcd(g, _view);
+            if (_listMode) DrawQueueLcd(g, _view);
+            else DrawLcd(g, _view);
             DrawGrille(g);
+            DrawButton(g, PrevRect, Button.Previous, enabled: _view.CanPrevious);
             DrawButton(g, PlayRect, Button.Play, enabled: _view.CanTogglePause);
             DrawButton(g, NextRect, Button.Next, enabled: _view.CanNext);
             DrawLamp(g, _view.State);
@@ -127,7 +246,7 @@ public sealed class RadioSurface : Control
         g.DrawLine(dark, BaseWidth - 1, 1, BaseWidth - 1, BaseHeight - 1);
     }
 
-    private void DrawLcd(Graphics g, RadioViewState v)
+    private static void DrawLcdBackground(Graphics g)
     {
         using var bezelPath = RoundedRect(Inflate(LcdRect, 3), 10);
         using var lcdPath = RoundedRect(LcdRect, 7);
@@ -135,6 +254,11 @@ public sealed class RadioSurface : Control
         using var lcd = new SolidBrush(RetroTheme.LcdBackground);
         g.FillPath(bezel, bezelPath);
         g.FillPath(lcd, lcdPath);
+    }
+
+    private void DrawLcd(Graphics g, RadioViewState v)
+    {
+        DrawLcdBackground(g);
 
         var text = RetroTheme.LcdText;
         using var normal = new SolidBrush(text);
@@ -157,6 +281,43 @@ public sealed class RadioSurface : Control
         // 最后一行：简短的错误或提示
         if (!string.IsNullOrEmpty(v.Message))
             g.DrawString(v.Message, _messageFont, dim, new RectangleF(left, LcdRect.Bottom - 22, width, 16), _lineFormat);
+    }
+
+    private void DrawQueueLcd(Graphics g, RadioViewState v)
+    {
+        DrawLcdBackground(g);
+
+        var text = RetroTheme.LcdText;
+        using var normal = new SolidBrush(text);
+        using var dim = new SolidBrush(Color.FromArgb(170, text));
+        using var inverse = new SolidBrush(RetroTheme.LcdBackground);
+
+        var left = LcdRect.Left + 10;
+        var width = LcdRect.Width - 20;
+        var items = v.Queue ?? Array.Empty<QueueItem>();
+
+        g.DrawString($"QUEUE {(items.Count == 0 ? 0 : _browser.Cursor + 1):00}/{items.Count:00}", _positionFont, dim,
+            new RectangleF(left, LcdRect.Top + 6, 110, 16), _lineFormat);
+        g.DrawString("ENTER:PLAY DEL:REMOVE", _messageFont, dim,
+            new RectangleF(left + 110, LcdRect.Top + 6, width - 110, 16), _rightFormat);
+
+        var playing = v.Position - 1;
+        for (var row = 0; row < ListRows; row++)
+        {
+            var index = _browser.IndexAtRow(row);
+            if (index < 0 || index >= items.Count) break;
+
+            var item = items[index];
+            var selected = index == _browser.Cursor;
+            var rowRect = new RectangleF(LcdRect.Left + 6, LcdRect.Top + ListHeaderHeight + row * ListRowHeight, LcdRect.Width - 12, ListRowHeight);
+
+            if (selected) g.FillRectangle(normal, rowRect);
+
+            var label = string.IsNullOrWhiteSpace(item.Title) ? $"({item.Id})" : item.Title;
+            var marker = index == playing ? '>' : ' ';
+            g.DrawString($"{marker}{index + 1:000} {label}", _rowFont, selected ? inverse : normal,
+                new RectangleF(rowRect.X + 2, rowRect.Y, rowRect.Width - 4, rowRect.Height), _lineFormat);
+        }
     }
 
     private static string TagFor(RadioViewState v) =>
@@ -199,22 +360,26 @@ public sealed class RadioSurface : Control
         var cx = r.X + r.Width / 2;
         var cy = r.Y + r.Height / 2;
 
-        if (which == Button.Play)
+        switch (which)
         {
-            if (_view.State == PlaybackState.Playing)
-            {
+            case Button.Play when _view.State == PlaybackState.Playing:
                 g.FillRectangle(iconBrush, cx - 9, cy - 11, 6, 22);
                 g.FillRectangle(iconBrush, cx + 3, cy - 11, 6, 22);
-            }
-            else
-            {
+                break;
+
+            case Button.Play:
                 g.FillPolygon(iconBrush, new[] { new PointF(cx - 8, cy - 12), new PointF(cx - 8, cy + 12), new PointF(cx + 12, cy) });
-            }
-        }
-        else
-        {
-            g.FillPolygon(iconBrush, new[] { new PointF(cx - 11, cy - 11), new PointF(cx - 11, cy + 11), new PointF(cx + 5, cy) });
-            g.FillRectangle(iconBrush, cx + 7, cy - 11, 4, 22);
+                break;
+
+            case Button.Next:
+                g.FillPolygon(iconBrush, new[] { new PointF(cx - 11, cy - 11), new PointF(cx - 11, cy + 11), new PointF(cx + 5, cy) });
+                g.FillRectangle(iconBrush, cx + 7, cy - 11, 4, 22);
+                break;
+
+            case Button.Previous:
+                g.FillPolygon(iconBrush, new[] { new PointF(cx + 11, cy - 11), new PointF(cx + 11, cy + 11), new PointF(cx - 5, cy) });
+                g.FillRectangle(iconBrush, cx - 11, cy - 11, 4, 22);
+                break;
         }
     }
 
@@ -250,37 +415,81 @@ public sealed class RadioSurface : Control
 
     // ───────────── 鼠标 ─────────────
 
-    private Button? HitTest(Point p)
+    private PointF ToBase(Point p) => new(p.X / ScaleFactor, p.Y / ScaleFactor);
+
+    private Button? HitTestButton(Point p)
     {
-        var s = ScaleFactor;
-        var x = p.X / s;
-        var y = p.Y / s;
-        if (Contains(PlayRect, x, y)) return Button.Play;
-        if (Contains(NextRect, x, y)) return Button.Next;
+        var b = ToBase(p);
+        if (Contains(PrevRect, b)) return Button.Previous;
+        if (Contains(PlayRect, b)) return Button.Play;
+        if (Contains(NextRect, b)) return Button.Next;
         return null;
     }
 
     /// <summary>用外接圆做命中判断，使点击区域与圆形按钮一致。</summary>
-    private static bool Contains(RectangleF r, float x, float y)
+    private static bool Contains(RectangleF r, PointF p)
     {
-        var dx = x - (r.X + r.Width / 2);
-        var dy = y - (r.Y + r.Height / 2);
+        var dx = p.X - (r.X + r.Width / 2);
+        var dy = p.Y - (r.Y + r.Height / 2);
         return dx * dx + dy * dy <= r.Width * r.Width / 4;
     }
 
-    private bool IsEnabled(Button b) => b == Button.Play ? _view.CanTogglePause : _view.CanNext;
+    /// <summary>列表模式下，鼠标位置对应的队列索引；不在条目行上时返回 -1。</summary>
+    private int ListIndexAt(Point p)
+    {
+        var b = ToBase(p);
+        if (!LcdRect.Contains(b)) return -1;
+        var row = (int)Math.Floor((b.Y - LcdRect.Top - ListHeaderHeight) / ListRowHeight);
+        return row < 0 ? -1 : _browser.IndexAtRow(row);
+    }
+
+    private bool IsEnabled(Button b) => b switch
+    {
+        Button.Previous => _view.CanPrevious,
+        Button.Play => _view.CanTogglePause,
+        _ => _view.CanNext,
+    };
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        // 点击机身时让输入框失去焦点，Space / N 快捷键随即恢复可用。
+        // 点击机身时让输入框失去焦点，快捷键随即恢复可用。
         if (FindForm() is { } form) form.ActiveControl = null;
         if (e.Button != MouseButtons.Left) return;
-        if (HitTest(e.Location) is { } b && IsEnabled(b))
+
+        if (HitTestButton(e.Location) is { } b)
         {
+            if (!IsEnabled(b)) return;
             _pressed = b;
             Invalidate();
+            return;
         }
+
+        if (!LcdRect.Contains(ToBase(e.Location))) return;
+
+        if (!_listMode) OpenList();
+        else if (ListIndexAt(e.Location) is var index and >= 0) { _browser.SetCursor(index); Invalidate(); }
+        else if (ToBase(e.Location).Y < LcdRect.Top + ListHeaderHeight) CloseList(); // 点击标题栏：返回播放显示
+    }
+
+    protected override void OnMouseDoubleClick(MouseEventArgs e)
+    {
+        base.OnMouseDoubleClick(e);
+        if (!_listMode || e.Button != MouseButtons.Left) return;
+
+        if (ListIndexAt(e.Location) is var index and >= 0)
+        {
+            PlayIndexRequested?.Invoke(index);
+            CloseList();
+        }
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+        if (!_listMode || e.Delta == 0) return;
+        _browser.MoveBy(e.Delta > 0 ? -1 : 1);
+        Invalidate();
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -291,18 +500,23 @@ public sealed class RadioSurface : Control
         if (pressed is null) return;
         Invalidate();
 
-        if (HitTest(e.Location) == pressed && IsEnabled(pressed.Value))
+        if (HitTestButton(e.Location) == pressed && IsEnabled(pressed.Value))
         {
-            if (pressed == Button.Play) PlayPauseClicked?.Invoke();
-            else NextClicked?.Invoke();
+            switch (pressed)
+            {
+                case Button.Previous: PreviousClicked?.Invoke(); break;
+                case Button.Play: PlayPauseClicked?.Invoke(); break;
+                default: NextClicked?.Invoke(); break;
+            }
         }
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
-        var over = HitTest(e.Location) is { } b && IsEnabled(b);
-        Cursor = over ? Cursors.Hand : Cursors.Default;
+        var overButton = HitTestButton(e.Location) is { } b && IsEnabled(b);
+        var overLcd = LcdRect.Contains(ToBase(e.Location)) && (_listMode || QueueCount > 0);
+        Cursor = overButton || overLcd ? Cursors.Hand : Cursors.Default;
     }
 
     protected override void OnMouseLeave(EventArgs e)
@@ -323,6 +537,7 @@ public sealed class RadioSurface : Control
             _tagFont.Dispose();
             _titleFont.Dispose();
             _messageFont.Dispose();
+            _rowFont.Dispose();
             _titleFormat.Dispose();
             _lineFormat.Dispose();
             _rightFormat.Dispose();

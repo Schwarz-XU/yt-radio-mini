@@ -21,4 +21,19 @@ public interface IRadioController : IAsyncDisposable
 
     Task TogglePauseAsync();
     Task NextAsync();
+    Task PreviousAsync();
+
+    // 队列编辑。索引都是 0 起始的队列位置；越界的请求被忽略。
+
+    /// <summary>立即播放指定位置的条目（正在播放的条目也会从头重新开始）。</summary>
+    Task PlayIndexAsync(int index);
+
+    /// <summary>删除条目。删除正在播放的条目时，原来的下一项顶上来并开始播放；没有下一项则停止。</summary>
+    Task RemoveAsync(int index);
+
+    /// <summary>把条目从 from 移到 to，不影响正在播放的内容。</summary>
+    Task MoveAsync(int from, int to);
+
+    /// <summary>清空队列并停止播放。</summary>
+    Task ClearAsync();
 }
