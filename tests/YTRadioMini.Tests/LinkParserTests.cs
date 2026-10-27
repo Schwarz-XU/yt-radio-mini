@@ -47,6 +47,41 @@ public class LinkParserTests
         Assert.Equal($"https://www.youtube.com/playlist?list={Pl}", link.Url);
     }
 
+    [Theory]
+    // 实际遇到的链接：视频同时属于自动合辑
+    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDeMe4vE1X60M&start_radio=1&t=14s", "eMe4vE1X60M")]
+    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDMMeMe4vE1X60M", "eMe4vE1X60M")]
+    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDGMEMCMFH2exzjBeE_zAHHJOdxg", "eMe4vE1X60M")]
+    [InlineData("https://youtu.be/eMe4vE1X60M?list=RDeMe4vE1X60M", "eMe4vE1X60M")]
+    [InlineData("https://www.youtube.com/live/eMe4vE1X60M?list=RDeMe4vE1X60M", "eMe4vE1X60M")]
+    // 只给合辑地址：用 ID 里的种子视频
+    [InlineData("https://www.youtube.com/playlist?list=RDeMe4vE1X60M", "eMe4vE1X60M")]
+    [InlineData("https://www.youtube.com/playlist?list=RDAMVMeMe4vE1X60M", "eMe4vE1X60M")]
+    public void MixLinks_PlayTheSeedVideo(string input, string expectedId)
+    {
+        var link = Assert.Single(LinkParser.Parse(input).Valid);
+
+        Assert.Equal(LinkKind.Video, link.Kind);
+        Assert.Equal(expectedId, link.Id);
+        Assert.Equal($"https://www.youtube.com/watch?v={expectedId}", link.Url);
+    }
+
+    [Theory]
+    [InlineData("https://www.youtube.com/playlist?list=RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs")]
+    [InlineData("https://www.youtube.com/watch?v=eMe4vE1X60M&list=RDCLAK5uy_kmPRjHDECIcuVwnKsx2Ng7fyNgFKWNJFs")]
+    public void RdclakAlbumPlaylists_AreStillPlaylists(string input)
+    {
+        var link = Assert.Single(LinkParser.Parse(input).Valid);
+        Assert.Equal(LinkKind.Playlist, link.Kind);
+    }
+
+    [Fact]
+    public void MixWithoutDerivableSeed_OnPlaylistUrl_StaysAPlaylist()
+    {
+        var link = Assert.Single(LinkParser.Parse("https://www.youtube.com/playlist?list=RDGMEMCMFH2exzjBeE_zAHHJOdxg").Valid);
+        Assert.Equal(LinkKind.Playlist, link.Kind);
+    }
+
     [Fact]
     public void WatchWithInvalidList_FallsBackToVideo()
     {

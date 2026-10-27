@@ -30,6 +30,7 @@ public sealed class RadioSurface : Control
 
     private RadioViewState _view = RadioViewState.Empty;
     private Button? _pressed;
+    private string _inputNote = "";
 
     private enum Button { Play, Next }
 
@@ -55,6 +56,20 @@ public sealed class RadioSurface : Control
             if (_view == value) return;
             _view = value;
             AccessibleDescription = $"{value.State}: {value.Title} {value.Position}/{value.Count} {value.Message}".Trim();
+            Invalidate();
+        }
+    }
+
+    /// <summary>显示在输入框上方的一行小字，例如"3 条链接待提交"；空字符串表示不显示。</summary>
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public string InputNote
+    {
+        get => _inputNote;
+        set
+        {
+            if (_inputNote == value) return;
+            _inputNote = value;
             Invalidate();
         }
     }
@@ -89,6 +104,12 @@ public sealed class RadioSurface : Control
             DrawButton(g, PlayRect, Button.Play, enabled: _view.CanTogglePause);
             DrawButton(g, NextRect, Button.Next, enabled: _view.CanNext);
             DrawLamp(g, _view.State);
+
+            if (_inputNote.Length > 0)
+            {
+                using var note = new SolidBrush(RetroTheme.SecondaryText);
+                g.DrawString(_inputNote, _messageFont, note, new RectangleF(18, 178, 324, 14), _lineFormat);
+            }
         }
         catch (Exception)
         {

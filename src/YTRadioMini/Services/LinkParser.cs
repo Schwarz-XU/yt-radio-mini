@@ -96,6 +96,14 @@ public static class LinkParser
             {
                 if (!query.TryGetValue("list", out listId)) { reason = "BAD LIST ID"; return false; }
                 if (!IsValidListId(listId)) { reason = "BAD LIST ID"; return false; }
+
+                // "RD" + 视频 ID 是以该视频为种子的自动合辑，不能按 /playlist 地址展开，改为播放种子视频。
+                if (MixSeedVideoId(listId) is { } seed)
+                {
+                    link = new ParsedLink(LinkKind.Video, VideoUrl(seed), seed, line);
+                    return true;
+                }
+
                 link = new ParsedLink(LinkKind.Playlist, PlaylistUrl(listId), listId, line);
                 return true;
             }
@@ -114,7 +122,8 @@ public static class LinkParser
         if (videoId is null || !IsValidVideoId(videoId)) { reason = "BAD VIDEO ID"; return false; }
 
         // 同时带有效 list 参数的链接优先按 Playlist 处理；list 无效则退回单个视频。
-        if (listId is not null && IsValidListId(listId))
+        // 例外：自动合辑（Mix）无法用 /playlist 地址展开，只播放链接里的这个视频。
+        if (listId is not null && IsValidListId(listId) && !IsMixList(listId))
         {
             link = new ParsedLink(LinkKind.Playlist, PlaylistUrl(listId), listId, line);
             return true;
@@ -122,6 +131,27 @@ public static class LinkParser
 
         link = new ParsedLink(LinkKind.Video, VideoUrl(videoId), videoId, line);
         return true;
+    }
+
+    /// <summary>
+    /// YouTube 自动生成的合辑（Mix / Radio）：列表 ID 以 "RD" 开头。
+    /// "RDCLAK" 开头的是 YouTube Music 的正式专辑/歌单，可以正常展开，不算合辑。
+    /// </summary>
+    public static bool IsMixList(string listId) =>
+        listId.StartsWith("RD", StringComparison.Ordinal) && !listId.StartsWith("RDCLAK", StringComparison.Ordinal);
+
+    /// <summary>"RD" + 11 位视频 ID 或 "RDAMVM" + 11 位视频 ID 形式的合辑返回种子视频 ID，否则返回 null。</summary>
+    private static string? MixSeedVideoId(string listId)
+    {
+        foreach (var prefix in new[] { "RDAMVM", "RD" })
+        {
+            if (listId.StartsWith(prefix, StringComparison.Ordinal) && listId.Length == prefix.Length + 11)
+            {
+                var id = listId[prefix.Length..];
+                if (IsValidVideoId(id)) return id;
+            }
+        }
+        return null;
     }
 
     public static string VideoUrl(string id) => $"https://www.youtube.com/watch?v={id}";

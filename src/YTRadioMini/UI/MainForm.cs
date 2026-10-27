@@ -13,7 +13,7 @@ public sealed class MainForm : Form
 
     private readonly IRadioController _radio;
     private readonly RadioSurface _surface = new() { Dock = DockStyle.Fill };
-    private readonly TextBox _input = new();
+    private readonly LinkTextBox _input = new();
     private Font? _inputFont;
     private bool _hintShown;
 
@@ -51,6 +51,7 @@ public sealed class MainForm : Form
         _input.KeyDown += OnInputKeyDown;
         _input.GotFocus += (_, _) => HideHint();
         _input.Leave += (_, _) => ShowHintIfEmpty();
+        _input.TextChanged += (_, _) => UpdateInputNote();
 
         ApplyScale(DeviceDpi);
         ShowHintIfEmpty();
@@ -131,15 +132,30 @@ public sealed class MainForm : Form
     {
         if (e.KeyCode == Keys.Enter)
         {
-            // Enter 与 Ctrl+Enter 都提交输入框中的全部内容（单行或多行）。
             e.SuppressKeyPress = e.Handled = true;
-            Submit();
+            if (e.Control || e.Shift)
+            {
+                // Ctrl+Enter / Shift+Enter：另起一行，用来逐条输入多个链接。
+                _input.SelectedText = "\r\n";
+            }
+            else
+            {
+                // Enter：提交输入框里的全部内容（一行或多行）。
+                Submit();
+            }
         }
         else if (e.KeyCode == Keys.Escape)
         {
             e.SuppressKeyPress = e.Handled = true;
             ActiveControl = null; // 放弃输入，把焦点还给窗口，Space / N 恢复可用
         }
+    }
+
+    /// <summary>输入框一次只能看到一行，多行时在上方提示共有几条。</summary>
+    private void UpdateInputNote()
+    {
+        var n = _hintShown ? 0 : _input.LineCountNonEmpty;
+        _surface.InputNote = n > 1 ? $"{n} LINKS READY - ENTER TO ADD" : "";
     }
 
     private void Submit()
