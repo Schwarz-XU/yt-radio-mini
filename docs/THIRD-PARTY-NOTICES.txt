@@ -1,10 +1,9 @@
 THIRD-PARTY NOTICES
 ===================
 
-YT Radio Mini's own code is licensed under the GNU Lesser General Public License, version 3 or
-later (files LICENSE, COPYING.LESSER and COPYING; in the release package they are in
-licenses\yt-radio-mini). This file is about the other software that is delivered in the same
-package. It is information, not legal advice.
+YT Radio Mini's own code is licensed under the MIT License (file LICENSE; in the release package
+it is also in licenses\yt-radio-mini). This file is about the other software that is delivered in
+the same package. It is information, not legal advice.
 
 How the programs fit together
 -----------------------------

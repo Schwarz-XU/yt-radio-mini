@@ -78,7 +78,7 @@ Copy-Item (Join-Path $repo 'CHANGELOG.md') $docs
 
 $own = Join-Path $licenses 'yt-radio-mini'
 New-Item -ItemType Directory -Force -Path $own | Out-Null
-foreach ($name in 'LICENSE', 'COPYING', 'COPYING.LESSER') { Copy-Item (Join-Path $repo $name) $own }
+Copy-Item (Join-Path $repo 'LICENSE') $own
 Copy-Item -Recurse -Force (Join-Path $repo 'licenses/*') $licenses
 
 $deps = Get-Content -Raw -Path (Join-Path $PSScriptRoot 'dependencies.json') | ConvertFrom-Json

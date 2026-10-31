@@ -16,7 +16,7 @@
     <Version>0.1.0</Version>
     <Product>YT Radio Mini</Product>
     <Authors>Schwarz-XU</Authors>
-    <Copyright>Copyright (C) 2026 Schwarz-XU. Licensed under the LGPL-3.0-or-later.</Copyright>
+    <Copyright>Copyright (c) 2026 Schwarz-XU. Licensed under the MIT License.</Copyright>
     <Description>A minimal retro audio player for YouTube links.</Description>
   </PropertyGroup>
 

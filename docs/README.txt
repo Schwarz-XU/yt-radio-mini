@@ -73,7 +73,7 @@ What is in this folder
 ----------------------
   YTRadioMini.exe             The program (the .NET runtime is inside it)
   README.txt                  This file
-  LICENSE.txt                 Licence of YT Radio Mini (LGPL-3.0-or-later)
+  LICENSE.txt                 Licence of YT Radio Mini (MIT)
   tools\mpv.exe               The audio player engine (https://mpv.io)
   tools\yt-dlp.exe            Reads YouTube playlists and streams (https://github.com/yt-dlp/yt-dlp)
   docs\THIRD-PARTY-NOTICES.txt  Licences and where to find the source code of the bundled programs
@@ -94,7 +94,7 @@ Problems
 
 Licence
 -------
-YT Radio Mini: Copyright (C) 2026 Schwarz-XU, GNU Lesser General Public License version 3 or later.
+YT Radio Mini: Copyright (c) 2026 Schwarz-XU, MIT License.
 mpv, yt-dlp and the .NET runtime are separate programs under their own licences; mpv.exe and
 yt-dlp.exe are GPL-licensed programs. See docs\THIRD-PARTY-NOTICES.txt for details and for where to
 get their source code.

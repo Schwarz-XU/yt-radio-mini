@@ -49,6 +49,7 @@ First public release.
   Bundled programs are pinned to exact versions and verified by SHA-256 (`scripts/dependencies.json`).
 - **Scripts:** `fetch-deps.ps1`, `build-release.ps1`, `measure-performance.ps1`, `make-icon.py`.
 - **Documentation:** README, end-user README, architecture notes, third-party notices, test report.
+- **Licence:** MIT License (`LICENSE`).
 - 280 automated tests (parser, queue, storage, yt-dlp handling, mpv IPC against a fake mpv and a
   real mpv, controller, single instance).
 

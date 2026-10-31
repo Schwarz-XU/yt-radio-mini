@@ -35,7 +35,7 @@ Exact checksums of the bundled programs are in `docs/DEPENDENCIES.txt`.
 
 ## Licences
 
-- YT Radio Mini: LGPL-3.0-or-later.
+- YT Radio Mini: MIT License.
 - `mpv.exe` is a **GPL** build (GPL v2 or later) and `yt-dlp.exe` is, as a whole, under the **GPL v3 or later**
   (yt-dlp's own code is the Unlicense). They are separate programs that YT Radio Mini starts; it does not link to
   them. Their licence texts and the addresses of their source code are in `docs/THIRD-PARTY-NOTICES.txt` and

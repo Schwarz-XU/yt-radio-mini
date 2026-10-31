@@ -145,8 +145,7 @@ powershell -ExecutionPolicy Bypass -File scripts/measure-performance.ps1 -Url "h
 
 ## Licence
 
-YT Radio Mini is Copyright (C) 2026 Schwarz-XU and licensed under the **GNU Lesser General Public License,
-version 3 or later** ([LICENSE](LICENSE), [COPYING.LESSER](COPYING.LESSER), [COPYING](COPYING)).
+YT Radio Mini is Copyright (c) 2026 Schwarz-XU and licensed under the **MIT License** ([LICENSE](LICENSE)).
 
 The release package also contains **mpv** and **yt-dlp**, which are separate programs started by YT Radio Mini
 (it does not link to them). Both are GPL-licensed programs; so is the combined `yt-dlp.exe`, and the bundled
