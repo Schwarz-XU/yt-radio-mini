@@ -20,7 +20,7 @@ See [CHANGELOG.md](https://github.com/Schwarz-XU/yt-radio-mini/blob/main/CHANGEL
 Unblock the zip (right-click, Properties, "Unblock") before extracting, then start `YTRadioMini.exe`.
 The program is not code-signed, so SmartScreen may warn on the first start ("More info", then "Run anyway").
 
-SHA-256 of the zip: `9961be290d845048ebd35e2f04ab95ac36f1b4ddbe6703c5856a62da03a5c720`
+SHA-256 of the zip: `48439950d8c42fd013a812df64f42a84bc06721f608819090fa4b388690954fa`
 
 ## What is inside
 
@@ -35,7 +35,7 @@ Exact checksums of the bundled programs are in `docs/DEPENDENCIES.txt`.
 
 ## Licences
 
-- YT Radio Mini: MIT License.
+- YT Radio Mini: MIT License. (A first upload of this version, with a different checksum, was licensed under the LGPL-3.0-or-later; this zip replaces it.)
 - `mpv.exe` is a **GPL** build (GPL v2 or later) and `yt-dlp.exe` is, as a whole, under the **GPL v3 or later**
   (yt-dlp's own code is the Unlicense). They are separate programs that YT Radio Mini starts; it does not link to
   them. Their licence texts and the addresses of their source code are in `docs/THIRD-PARTY-NOTICES.txt` and

@@ -69,7 +69,7 @@ public class SingleInstanceGuardTests
     }
 
     [Fact]
-    public void ThrowingSubscriber_DoesNotStopTheListener()
+    public async Task ThrowingSubscriber_DoesNotStopTheListener()
     {
         var name = UniqueName();
         using var first = new SingleInstanceGuard(name);
@@ -79,9 +79,9 @@ public class SingleInstanceGuardTests
 
         using var second = new SingleInstanceGuard(name);
         second.SignalExistingInstance();
-        TestSupport.WaitUntil(() => Volatile.Read(ref calls) == 1).GetAwaiter().GetResult();
+        await TestSupport.WaitUntil(() => Volatile.Read(ref calls) == 1);
         second.SignalExistingInstance();
-        TestSupport.WaitUntil(() => Volatile.Read(ref calls) == 2).GetAwaiter().GetResult();
+        await TestSupport.WaitUntil(() => Volatile.Read(ref calls) == 2);
     }
 
     [Fact]
